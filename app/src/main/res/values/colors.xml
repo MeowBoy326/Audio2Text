@@ -8,4 +8,9 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
     <color name="darkBlue">#03035A</color>
+    <color name="ic_mic_background">#3DDC84</color>
+    <color name="ic_stop_background">#FFFFFF</color>
+    <color name="ic_warning_background">#FFFFFF</color>
+    <color name="gray">#808080</color>
+    <color name="green">#008000</color>
 </resources>

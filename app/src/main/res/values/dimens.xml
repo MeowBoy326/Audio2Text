@@ -4,4 +4,5 @@
     <dimen name="txt_margin">10dp</dimen>
     <dimen name="txt_size">20sp</dimen>
     <dimen name="chronometer_txt_size">25sp</dimen>
+    <dimen name="fab_margin">48dp</dimen>
 </resources>

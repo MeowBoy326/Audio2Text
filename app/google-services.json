@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "880060683753",
+    "project_id": "audio2text-90d0f",
+    "storage_bucket": "audio2text-90d0f.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:880060683753:android:79ef312cc248d248ef6778",
+        "android_client_info": {
+          "package_name": "com.example.audio2text"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "880060683753-4gm1lqbb16cr29hl77icl6aa95803g0q.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxoye3a6PX4AgjBMuqMuXAGSMMCHlCtEg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "880060683753-4gm1lqbb16cr29hl77icl6aa95803g0q.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -4,4 +4,11 @@
     <string name="charger_audio">Charger audio</string>
     <string name="app_name">Audio2text</string>
     <string name="description">Dans cette application, vous pouvez convertir un audio en texte. Il vous suffit pour cela de sélectionner un fichier à partir du bouton en bas de l\'écran.</string>
+    <string name="dialog_yes">Oui</string>
+    <string name="dialog_no">Non</string>
+    <string name="arr_ter_la_transcription">Arrêter la transcription</string>
+    <string name="description_of_content">Valeur de transcription de l\'audio</string>
+    <string name="copy">Copier</string>
+    <string name="navigation_drawer_open">Open navigation drawer</string>
+    <string name="navigation_drawer_close">Close navigation drawer</string>
 </resources>
