@@ -2,16 +2,32 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
     <group android:checkableBehavior="single">
         <item
-            android:id="@+id/nav_item1"
-            android:title="Acheter" />
+            android:id="@+id/homeFragment"
+            android:icon="@drawable/home_icon"
+            android:title="Acceuil" />
         <item
-            android:id="@+id/nav_item2"
-            android:title="Paramètres" />
+            android:id="@+id/buy"
+            android:icon="@drawable/premium_icon"
+            android:title="Premium" />
         <item
-            android:id="@+id/nav_item3"
+            android:id="@+id/information"
+            android:icon="@drawable/information_icon"
             android:title="Informations" />
         <item
-            android:id="@+id/nav_item4"
+            android:id="@+id/questions"
+            android:icon="@drawable/question_icon"
             android:title="FAQ" />
+        <item
+            android:id="@+id/modelFragment"
+            android:icon="@drawable/model_icon"
+            android:title="Modèle" />
+        <item
+            android:id="@+id/settingsFragment"
+            android:icon="@drawable/settings_icon_menu"
+            android:title="Paramètres" />
+        <item
+            android:id="@+id/dictionaryFragment"
+            android:icon="@drawable/dictionary_icon"
+            android:title="Dictionnaires" />
     </group>
 </menu>

@@ -1,10 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="purple_200">#FFBB86FC</color>
-    <color name="purple_500">#FF6200EE</color>
-    <color name="purple_700">#FF3700B3</color>
-    <color name="teal_200">#FF03DAC5</color>
-    <color name="teal_700">#FF018786</color>
+    <color name="colorPrimary">#FF4A90E2</color>
+    <color name="colorPrimaryDark">#0D47A1</color> <!-- Déclaration de base -->
+    <color name="colorAccent">#FF4A90E2</color>
+    <color name="imageViewColor">#000000</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
     <color name="darkBlue">#03035A</color>
@@ -13,4 +12,15 @@
     <color name="ic_warning_background">#FFFFFF</color>
     <color name="gray">#808080</color>
     <color name="green">#008000</color>
+    <color name="menu_text_color">#000000</color>
+    <color name="navigation_background">#b7c9e2</color>
+    <color name="button_text_color">#FFFFFF</color>
+    <color name="button_text_color_ignored">#FF0000</color>
+    <color name="button_text_color_grant">#32CD32</color>
+    <color name="color_selected">#FF4081</color>
+    <color name="color_pressed">#FF4081</color>
+    <color name="color_normal">#000000</color>
+    <color name="colorDisabled">#FFFFFFFF</color>
+    <color name="colorEnabled">#b7c9e2</color>
+    <color name="colorBackgroundDico">#f5e8de</color>
 </resources>

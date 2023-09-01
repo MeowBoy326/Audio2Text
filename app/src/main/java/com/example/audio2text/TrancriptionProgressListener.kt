@@ -1,5 +1,9 @@
 package com.example.audio2text
 
+import androidx.annotation.Keep
+
+@Keep
 interface TranscriptionProgressListener {
-    fun onTranscriptionProgress(progress: Int)
+    suspend fun onTranscriptionProgress(progress: Int)
+    fun onTranscriptionProgressNonSuspend(progress: Int)
 }

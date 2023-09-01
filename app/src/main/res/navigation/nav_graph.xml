@@ -1,0 +1,28 @@
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/nav_graph"
+    app:startDestination="@id/homeFragment">
+    <fragment
+        android:id="@+id/homeFragment"
+        android:name="com.example.audio2text.HomeFragment"
+        android:label="Accueil">
+    </fragment>
+
+    <fragment
+        android:id="@+id/modelFragment"
+        android:name="com.example.audio2text.ModelSelectionFragment"
+        android:label="Modèle">
+    </fragment>
+
+    <fragment
+        android:id="@+id/settingsFragment"
+        android:name="com.example.audio2text.SettingsFragment"
+        android:label="Paramètres">
+    </fragment>
+
+    <fragment
+        android:id="@+id/dictionaryFragment"
+        android:name="com.example.audio2text.DictionaryFragment"
+        android:label="Dictionnaires">
+    </fragment>
+</navigation>

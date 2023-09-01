@@ -7,33 +7,41 @@
     <RelativeLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#000000"
-        android:padding="16dp">
+        android:paddingVertical="50dp"
+        android:paddingHorizontal="16dp">
 
         <TextView
-            android:layout_width="300dp"
+            android:id="@+id/text_notif"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_centerInParent="true"
+            android:layout_alignParentTop="true"
+            android:layout_centerHorizontal="true"
             android:textAlignment="center"
-            android:textColor="@color/white"
             android:text="Les notifications sont nécessaires pour vous informer des mises à jour."
-            android:textSize="30sp" />
+            android:textSize="25sp" />
+
+        <ImageView
+            android:id="@+id/notification_logo"
+            android:layout_width="150dp"
+            android:layout_height="150dp"
+            android:layout_centerInParent="true"
+            android:layout_marginTop="50dp"
+            android:src="@drawable/notif_icon" />
 
         <Button
             android:id="@+id/enableNotificationsButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_margin="16dp"
+            android:textColor="@color/button_text_color"
             android:layout_centerHorizontal="true"
             android:layout_alignParentBottom="true"
-            android:backgroundTint="#FFFFFF"
-            android:textColor="@color/black"
             android:text="Activer" />
 
 
 
         <com.google.android.material.floatingactionbutton.FloatingActionButton
-            android:id="@+id/nextArrow"
+            android:id="@+id/nextArrow2"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_alignParentEnd="true"
@@ -41,9 +49,11 @@
             android:layout_margin="16dp"
             app:maxImageSize="56dp"
             app:fabCustomSize="56dp"
+            app:elevation="6dp"
+            app:pressedTranslationZ="12dp"
             android:src="@drawable/right_arrow"
             android:visibility="gone"
-            app:tint="@color/white" />
+            app:tint="#CEE8FA"/>
     </RelativeLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

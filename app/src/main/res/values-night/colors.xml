@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorPrimary">#FF0D47A1</color>
+    <color name="colorPrimaryDark">#0D47A1</color> <!-- Déclaration pour le mode sombre -->
+    <color name="colorAccent">#FF0D47A1</color>
+    <color name="black">#FF000000</color>
+    <color name="imageViewColor">#FFFFFF</color>
+    <color name="white">#FFFFFF</color>
+    <color name="darkBlue">#03035A</color>
+    <color name="ic_mic_background">#3DDC84</color>
+    <color name="ic_stop_background">#FFFFFF</color>
+    <color name="ic_warning_background">#FFFFFF</color>
+    <color name="gray">#808080</color>
+    <color name="green">#008000</color>
+    <color name="menu_text_color">#FFFFFF</color>
+    <color name="navigation_background">#80a0cc</color>
+    <color name="button_text_color">#FFFFFF</color>
+    <color name="button_text_color_ignored">#990000</color>
+    <color name="button_text_color_grant">#006400</color>
+    <color name="color_selected">#FF4081</color>
+    <color name="color_pressed">#FF4081</color>
+    <color name="color_normal">#FFFFFF</color>
+    <color name="colorDisabled">#FFFFFFFF</color>
+    <color name="colorEnabled">#80a0cc</color>
+    <color name="colorBackgroundDico">#f5e8de</color>
+</resources>

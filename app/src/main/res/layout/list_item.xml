@@ -1,0 +1,57 @@
+<TableLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:stretchColumns="*">
+
+    <TableRow
+        android:id="@+id/tableRow1"
+        android:paddingHorizontal="16dp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_horizontal" >
+
+        <TextView
+            android:id="@+id/textView"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="0.3"
+            android:layout_gravity="center_vertical"
+            android:text="Nom du dictionnaire"/>
+
+        <ProgressBar
+            android:id="@+id/progressBarDictionary"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="0.6"
+            android:layout_gravity="center_vertical"
+            android:indeterminate="false"
+            android:padding="16dp"
+            android:progressBackgroundTintMode="src_atop"/>
+
+        <ImageButton
+            android:id="@+id/download_button"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:contentDescription="Télécharger"
+            android:src="@drawable/download_icon"
+            android:layout_weight="0.1"
+            android:layout_gravity="center_vertical"
+            android:backgroundTint="@android:color/transparent"
+            app:tint="@color/colorAccent" />
+
+        <ImageButton
+            android:id="@+id/delete_button"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:src="@drawable/delete_icon"
+            android:layout_gravity="center_vertical"
+            android:layout_weight="0.1"
+            android:contentDescription="Supprimer"
+            android:visibility="gone"
+            android:backgroundTint="@android:color/transparent"
+            app:tint="@color/button_text_color_ignored" />
+    </TableRow>
+</TableLayout>

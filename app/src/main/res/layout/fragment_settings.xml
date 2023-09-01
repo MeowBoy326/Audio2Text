@@ -1,0 +1,247 @@
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:paddingHorizontal="16dp"
+    android:paddingBottom="50dp"
+    android:paddingTop="16dp">
+
+    <LinearLayout
+        android:id="@+id/centered_layout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        app:layout_constraintBottom_toTopOf="@id/confirm_button"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <LinearLayout
+            android:id="@+id/spinner_layout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="16dp"
+            android:orientation="horizontal">
+
+            <Spinner
+                android:id="@+id/spinner_language"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.5"
+                android:minHeight="48dp"
+                android:prompt="@string/select_language"
+                android:spinnerMode="dialog" />
+
+            <Spinner
+                android:id="@+id/spinner_ignore_language"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.5"
+                android:minHeight="48dp"
+                android:prompt="@string/select_language_ignored"
+                android:spinnerMode="dialog" />
+
+        </LinearLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/textInputLayout_initial_prompt"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="16dp"
+            app:endIconDrawable="@drawable/icon_close"
+            app:endIconMode="clear_text"
+            app:endIconTint="@android:color/holo_red_dark">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/edittext_initial_prompt"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Entrez le prompt de contextualisation ici..."
+                android:inputType="text"
+                android:maxLines="3" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <LinearLayout
+            android:id="@+id/switch_layout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="16dp"
+            android:orientation="horizontal">
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/translate_switch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.7"
+                android:padding="5dp"
+                android:text="Traduire (en anglais)" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/speed_switch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.3"
+                android:padding="5dp"
+                android:text="Accélerer" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/segment_length_layout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="16dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/segment_length_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.1"
+                android:text="Diviser l'audio en tranche de :" />
+
+            <SeekBar
+                android:id="@+id/segment_length_seekbar"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.9"
+                android:max="11"
+                android:progress="5" />
+
+            <TextView
+                android:id="@+id/segment_length_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="30s" />
+        </LinearLayout>
+
+        <!-- Taille maximale du texte à générer -->
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="16dp"
+            android:hint="Taille maximale des paragraphes (nombre de caractères)">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/edittext_max_text_size"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="number"
+                android:text="1000" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <GridLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_margin="16dp"
+            android:layout_gravity="center_horizontal"
+            android:columnCount="3"
+            android:rowCount="2">
+
+            <!-- Texte "Début audio" -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_row="0"
+                android:layout_column="0"
+                android:textStyle="bold"
+                android:layout_gravity="center"
+                android:layout_marginBottom="8dp"
+                android:text="Début audio" />
+
+            <!-- Espace entre Début et Fin -->
+            <View
+                android:layout_row="0"
+                android:layout_column="1"
+                android:layout_width="16dp"
+                android:layout_height="1dp"></View>
+
+            <!-- Texte "Fin audio" -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_row="0"
+                android:textStyle="bold"
+                android:layout_column="2"
+                android:layout_gravity="center"
+                android:layout_marginBottom="8dp"
+                android:text="Fin audio" />
+
+            <!-- Panneau de contrôle pour le début -->
+            <LinearLayout
+                android:id="@+id/linear_layout_start"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_row="1"
+                android:layout_column="0"
+                android:orientation="horizontal">
+
+                <NumberPicker
+                    android:id="@+id/numberPicker_minutes_start"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text=":"
+                    android:textAlignment="center"
+                    android:textSize="30sp"
+                    android:layout_gravity="center"/>
+
+                <NumberPicker
+                    android:id="@+id/numberPicker_seconds_start"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"/>
+            </LinearLayout>
+
+            <!-- Espace entre Début et Fin -->
+            <View
+                android:layout_row="1"
+                android:layout_column="1"
+                android:layout_width="16dp"
+                android:layout_height="1dp"></View>
+
+            <!-- Panneau de contrôle pour la fin -->
+            <LinearLayout
+                android:id="@+id/linear_layout_end"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_row="1"
+                android:layout_column="2"
+                android:orientation="horizontal">
+
+                <NumberPicker
+                    android:id="@+id/numberPicker_minutes_end"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text=":"
+                    android:textSize="30sp"
+                    android:layout_gravity="center"/>
+
+                <NumberPicker
+                    android:id="@+id/numberPicker_seconds_end"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"/>
+            </LinearLayout>
+
+        </GridLayout>
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/confirm_button"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Valider"
+        android:textColor="@color/button_text_color"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintLeft_toLeftOf="parent"
+        app:layout_constraintRight_toRightOf="parent" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

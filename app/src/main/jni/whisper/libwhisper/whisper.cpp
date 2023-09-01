@@ -1,4 +1,6 @@
 #include "whisper.h"
+#include <iomanip>
+#include <sstream>
 #include <android/log.h>
 #ifdef WHISPER_USE_COREML
 #include "coreml/whisper-encoder.h"
@@ -653,6 +655,7 @@ struct whisper_state {
     int lang_id = 0; // english by default
 
     std::string path_model; // populated by whisper_init_from_file()
+    std::string remainingText;
 #ifdef WHISPER_USE_COREML
     whisper_coreml_context * ctx_coreml = nullptr;
 #endif
@@ -708,8 +711,6 @@ struct whisper_context {
 
     //Added
     bool isStopped = false;
-    InferenceStoppedCallback inferenceStoppedCallback;
-    void* user_data;
 
     ggml_type wtype = ggml_type::GGML_TYPE_F16; // weight type (FP32 / FP16 / QX)
     ggml_type itype = ggml_type::GGML_TYPE_F16; // intermediate type (FP32 or FP16)
@@ -724,16 +725,16 @@ struct whisper_context {
 // Fonction d'accès pour obtenir le dernier segment
 /*IMPORTANT FUNCTION TO KEEP*/
 whisper_segment* get_last_segment(whisper_state* state) {
-    // Vérifiez si result_all est vide
-    if (state->result_all.empty()) {
-        return nullptr; // ou gérer cette situation comme vous le souhaitez
-    }
-
     // Créez un nouveau whisper_segment sur le tas
-    whisper_segment* segment = new whisper_segment;
+    auto* segment = new whisper_segment;
 
-    // Copiez les données depuis le dernier élément de result_all
-    *segment = state->result_all.back();
+    if (state->result_all.empty()) {
+        // Si result_all est vide, initialisez le texte à une chaîne vide
+        segment->text = "";
+    } else {
+        // Sinon, copiez les données depuis le dernier élément de result_all
+        *segment = state->result_all.back();
+    }
 
     // Retournez le pointeur vers le segment
     return segment;
@@ -741,11 +742,8 @@ whisper_segment* get_last_segment(whisper_state* state) {
 
 /*IMPORTANT FUNCTION TO KEEP*/
 void set_is_stopped(whisper_context* ctx) {
-    if (ctx) {
-        ctx->isStopped = true;
-        if (ctx->inferenceStoppedCallback) {
-            ctx->inferenceStoppedCallback(ctx->user_data);
-        }
+        if (ctx) {
+                ctx->isStopped = true;
     }
 }
 
@@ -852,8 +850,7 @@ static void kv_cache_free(struct whisper_kv_cache & cache) {
 // see the convert-pt-to-ggml.py script for details
 //
 static bool whisper_model_load(struct whisper_model_loader * loader, whisper_context & wctx) {
-    log("%s: loading model\n", __func__);
-
+    
     const int64_t t_start_us = ggml_time_us();
 
     wctx.t_start_us = t_start_us;
@@ -866,8 +863,7 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
         uint32_t magic;
         read_safe(loader, magic);
         if (magic != GGML_FILE_MAGIC) {
-            log("%s: invalid model data (bad magic)\n", __func__);
-            return false;
+                        return false;
         }
     }
 
@@ -917,8 +913,7 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
         // in order to save memory and also to speed up the computation
         wctx.wtype = ggml_ftype_to_ggml_type((ggml_ftype) (model.hparams.ftype));
         if (wctx.wtype == GGML_TYPE_COUNT) {
-            log("%s: invalid model (bad ftype value %d)\n", __func__, model.hparams.ftype);
-            return false;
+                        return false;
         }
 
         const size_t scale = model.hparams.ftype ? 1 : 2;
@@ -1414,29 +1409,21 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
             name.assign(&tmp[0], tmp.size());
 
             if (model.tensors.find(name) == model.tensors.end()) {
-                log("%s: unknown tensor '%s' in model file\n", __func__, name.data());
-                return false;
+                                return false;
             }
 
             auto tensor = model.tensors[name.data()];
             if (ggml_nelements(tensor) != nelements) {
-                log("%s: tensor '%s' has wrong size in model file\n", __func__, name.data());
-                log("%s: shape: [%d, %d, %d], expected: [%d, %d, %d]\n",
-                    __func__, ne[0], ne[1], ne[2], (int) tensor->ne[0], (int) tensor->ne[1], (int) tensor->ne[2]);
                 return false;
             }
 
             if (tensor->ne[0] != ne[0] || tensor->ne[1] != ne[1] || tensor->ne[2] != ne[2]) {
-                log("%s: tensor '%s' has wrong shape in model file: got [%d, %d, %d], expected [%d, %d, %d]\n",
-                    __func__, name.data(), (int) tensor->ne[0], (int) tensor->ne[1], (int) tensor->ne[2], ne[0], ne[1], ne[2]);
                 return false;
             }
 
             const size_t bpe = ggml_type_size(ggml_type(ttype));
 
             if ((nelements*bpe)/ggml_blck_size(tensor->type) != ggml_nbytes(tensor)) {
-                log("%s: tensor '%s' has wrong size in model file: got %zu, expected %zu\n",
-                    __func__, name.data(), ggml_nbytes(tensor), nelements*bpe);
                 return false;
             }
 
@@ -1451,8 +1438,7 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
         log("%s: model size    = %7.2f MB\n", __func__, total_size/1024.0/1024.0);
 
         if (model.n_loaded == 0) {
-            log("%s: WARN no tensors loaded from model file - assuming empty model for testing\n", __func__);
-        } else if (model.n_loaded != (int) model.tensors.size()) {
+                    } else if (model.n_loaded != (int) model.tensors.size()) {
             log("%s: ERROR not all tensors loaded from model file - expected %zu, got %d\n", __func__, model.tensors.size(), model.n_loaded);
             return false;
         }
@@ -2835,12 +2821,10 @@ int whisper_ctx_init_openvino_encoder(
 
 struct whisper_context * whisper_init_from_file_no_state(const char * path_model) {
 
-    log("%s: loading model from '%s'\n", __func__, path_model);
-
+    
     auto fin = std::ifstream(path_model, std::ios::binary);
     if (!fin) {
-        log("%s: failed to open '%s'\n", __func__, path_model);
-        return nullptr;
+                return nullptr;
     }
 
     whisper_model_loader loader = {};
@@ -2863,8 +2847,10 @@ struct whisper_context * whisper_init_from_file_no_state(const char * path_model
         fin->close();
     };
 
+    
     auto ctx = whisper_init_no_state(&loader);
 
+    
     if (ctx) {
         ctx->path_model = path_model;
     }
@@ -2916,8 +2902,7 @@ struct whisper_context * whisper_init_no_state(struct whisper_model_loader * loa
 
     if (!whisper_model_load(loader, *ctx)) {
         loader->close(loader->context);
-        log("%s: failed to load model\n", __func__);
-        delete ctx;
+                delete ctx;
         return nullptr;
     }
 
@@ -2927,7 +2912,7 @@ struct whisper_context * whisper_init_no_state(struct whisper_model_loader * loa
 }
 
 struct whisper_context * whisper_init_from_file(const char * path_model) {
-    whisper_context * ctx = whisper_init_from_file_no_state(path_model);
+        whisper_context * ctx = whisper_init_from_file_no_state(path_model);
     if (!ctx) {
         return nullptr;
     }
@@ -2999,14 +2984,14 @@ void whisper_free_state(struct whisper_state * state)
 }
 
 void whisper_free(struct whisper_context * ctx) {
-    if (ctx) {
-        if (ctx->model.ctx) {
+        if (ctx) {
+                if (ctx->model.ctx) {
             ggml_free(ctx->model.ctx);
         }
         if (ctx->model.buf) {
             delete ctx->model.buf;
         }
-
+        
         whisper_free_state(ctx->state);
 
         delete ctx;
@@ -3400,22 +3385,14 @@ whisper_token whisper_token_transcribe(struct whisper_context * ctx) {
 void whisper_print_timings(struct whisper_context * ctx) {
     const int64_t t_end_us = ggml_time_us();
 
-    __android_log_print(ANDROID_LOG_DEBUG, "Whisper", "\n");
-    __android_log_print(ANDROID_LOG_DEBUG, "Whisper", "%s:     load time = %8.2f ms\n", __func__, ctx->t_load_us / 1000.0f);
-    if (ctx->state != nullptr) {
+            if (ctx->state != nullptr) {
 
         const int32_t n_sample = std::max(1, ctx->state->n_sample);
         const int32_t n_encode = std::max(1, ctx->state->n_encode);
         const int32_t n_decode = std::max(1, ctx->state->n_decode);
 
-        __android_log_print(ANDROID_LOG_DEBUG, "Whisper", "%s:     fallbacks = %3d p / %3d h\n", __func__, ctx->state->n_fail_p, ctx->state->n_fail_h);
-        __android_log_print(ANDROID_LOG_DEBUG, "Whisper", "%s:      mel time = %8.2f ms\n", __func__, ctx->state->t_mel_us / 1000.0f);
-        __android_log_print(ANDROID_LOG_DEBUG, "Whisper", "%s:   sample time = %8.2f ms / %5d runs (%8.2f ms per run)\n", __func__, 1e-3f * ctx->state->t_sample_us, n_sample, 1e-3f * ctx->state->t_sample_us / n_sample);
-        __android_log_print(ANDROID_LOG_DEBUG, "Whisper", "%s:   encode time = %8.2f ms / %5d runs (%8.2f ms per run)\n", __func__, 1e-3f * ctx->state->t_encode_us, n_encode, 1e-3f * ctx->state->t_encode_us / n_encode);
-        __android_log_print(ANDROID_LOG_DEBUG, "Whisper", "%s:   decode time = %8.2f ms / %5d runs (%8.2f ms per run)\n", __func__, 1e-3f * ctx->state->t_decode_us, n_decode, 1e-3f * ctx->state->t_decode_us / n_decode);
+                                            }
     }
-    __android_log_print(ANDROID_LOG_DEBUG, "Whisper", "%s:    total time = %8.2f ms\n", __func__, (t_end_us - ctx->t_start_us)/1000.0f);
-}
 
 void whisper_reset_timings(struct whisper_context * ctx) {
     if (ctx->state != nullptr) {
@@ -3495,6 +3472,7 @@ struct whisper_full_params whisper_full_default_params(enum whisper_sampling_str
             /*.thold_ptsum       =*/ 0.01f,
             /*.max_len           =*/ 0,
             /*.split_on_word     =*/ false,
+            /*.split_on_punctuation =*/ false,
             /*.max_tokens        =*/ 0,
 
             /*.speed_up          =*/ false,
@@ -3508,6 +3486,7 @@ struct whisper_full_params whisper_full_default_params(enum whisper_sampling_str
 
             /*.language          =*/ "en",
             /*.detect_language   =*/ false,
+            /*.ignore_lang_id    =*/ "",
 
             /*.suppress_blank    =*/ true,
             /*.suppress_non_speech_tokens =*/ false,
@@ -3579,9 +3558,70 @@ static inline bool should_split_on_word(const char * txt, bool split_on_word) {
     return txt[0] == ' ';
 }
 
-// wrap the last segment to max_len characters
-// returns the number of new segments
-static int whisper_wrap_segment(struct whisper_context & ctx, struct whisper_state & state, int max_len, bool split_on_word) {
+static int whisper_wrap_segment(struct whisper_context & ctx, struct whisper_state & state, int max_len, bool split_on_word, bool split_on_punctuation) {
+    auto &segment = state.result_all.back();
+    int res = 1;
+    int acc = 0;
+    bool splitHappened = false;  // Variable pour suivre si une division a eu lieu
+
+    std::string text = state.remainingText;  // Charger le texte restant
+        state.remainingText.clear();  // Vider le texte restant pour ce segment
+
+    const std::string punctuation_chars = ",.!?:";
+
+    for (int i = 0; i < (int) segment.tokens.size(); ++i) {
+        const auto & token = segment.tokens[i];
+
+        if (token.id >= whisper_token_eot(&ctx)) {
+            continue;
+        }
+
+        const auto txt = whisper_token_to_str(&ctx, token.id);
+                const int cur = strlen(txt);
+
+        bool contains_punctuation = false;
+
+        if (split_on_punctuation) {
+            contains_punctuation = std::any_of(text.begin(), text.end(),
+                                               [&](char c) { return punctuation_chars.find(c) != std::string::npos; });
+        }
+
+        
+        if (acc + cur > max_len && i > 0 && (split_on_word || (split_on_punctuation && contains_punctuation))) {
+                        std::string first_part, second_part;
+            if (contains_punctuation) {
+                size_t pos = text.find_last_of(punctuation_chars);
+                first_part = text.substr(0, pos + 1);
+                                second_part = text.substr(pos + 1) + txt;
+                            }
+
+            // Mise à jour du segment actuel avec first_part
+            state.result_all.back().text = std::move(first_part);
+            
+            // Ajouter second_part à remainingText
+            state.remainingText = std::move(second_part);
+
+            acc = 0;
+            text.clear();
+            splitHappened = true;  // Mettre à jour l'indicateur
+        } else {
+                        acc += cur;
+            text += txt;
+        }
+    }
+
+    
+    // Ajouter le texte à remainingText seulement si une division n'a pas déjà eu lieu
+    if (splitHappened && !text.empty()) {
+        state.remainingText += text;
+    } else if (!splitHappened && !state.remainingText.empty()) {
+        state.result_all.back().text += state.remainingText;
+    }
+
+    return res;
+}
+
+/*static int whisper_wrap_segment(struct whisper_context & ctx, struct whisper_state & state, int max_len, bool split_on_word, bool split_on_punctuation) {
     auto segment = state.result_all.back();
 
     int res = 1;
@@ -3632,7 +3672,7 @@ static int whisper_wrap_segment(struct whisper_context & ctx, struct whisper_sta
     state.result_all.back().text = std::move(text);
 
     return res;
-}
+}*/
 
 static const std::vector<std::string> non_speech_tokens = {
         "\"", "#", "(", ")", "*", "+", "/", ":", ";", "<", "=", ">", "@", "[", "\\", "]", "^",
@@ -4049,6 +4089,25 @@ static void whisper_sequence_score(
     }
 }
 
+std::string formatTimestamp(int milliseconds) {
+    int hours = milliseconds / (1000 * 60 * 60);
+    int remainder = milliseconds % (1000 * 60 * 60);
+
+    int minutes = remainder / (1000 * 60);
+    remainder = remainder % (1000 * 60);
+
+    int seconds = remainder / 1000;
+    int ms = remainder % 1000;
+
+    std::ostringstream formattedTime;
+    formattedTime << std::setfill('0') << std::setw(2) << hours << ":"
+                  << std::setfill('0') << std::setw(2) << minutes << ":"
+                  << std::setfill('0') << std::setw(2) << seconds << "."
+                  << std::setfill('0') << std::setw(3) << ms;
+
+    return formattedTime.str();
+}
+
 int whisper_full_with_state(
         struct whisper_context * ctx,
         struct whisper_state * state,
@@ -4061,12 +4120,13 @@ int whisper_full_with_state(
     result_all.clear();
 
     if (ctx->isStopped) {
-        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 1");
-        whisper_free(ctx);
+                if (params.inferenceStoppedCallback) {
+            params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+        }
+        //whisper_free(ctx);
         return 1;
     } else {
-        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 1");
-    }
+            }
 
     // compute log mel spectrogram
     if (params.speed_up) {
@@ -4082,27 +4142,41 @@ int whisper_full_with_state(
     }
 
     if (ctx->isStopped) {
-        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 2");
-        whisper_free(ctx);
+                if (params.inferenceStoppedCallback) {
+            params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+        }
+        //whisper_free(ctx);
         return 1;
     } else {
-        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 2");
-    }
+            }
 
     // auto-detect language if not specified
     if (params.language == nullptr || strlen(params.language) == 0 || strcmp(params.language, "auto") == 0 || params.detect_language) {
         std::vector<float> probs(whisper_lang_max_id() + 1, 0.0f);
 
         const auto lang_id = whisper_lang_auto_detect_with_state(ctx, state, 0, params.n_threads, probs.data());
+
+        if (ctx->isStopped) {
+                        if (params.inferenceStoppedCallback) {
+                params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+            }
+            //whisper_free(ctx);
+            return 1;
+        } else {
+                    }
         if (lang_id < 0) {
             log("%s: failed to auto-detect language\n", __func__);
             return -3;
         }
+
         state->lang_id = lang_id;
         params.language = whisper_lang_str(lang_id);
 
-        log("%s: auto-detected language: %s (p = %f)\n", __func__, params.language, probs[whisper_lang_id(params.language)]);
-        if (params.detect_language) {
+        if (params.ignore_lang_id != nullptr && strcmp(params.ignore_lang_id, params.language) == 0) {
+            return 2;
+        }
+
+                if (params.detect_language) {
             return 0;
         }
     }
@@ -4112,12 +4186,12 @@ int whisper_full_with_state(
         state->t_last   = 0;
         state->tid_last = 0;
         state->energy = get_signal_energy(samples, n_samples, 32);
-    }
+
+            }
 
     const int seek_start = params.offset_ms/10;
     const int seek_end = params.duration_ms == 0 ? whisper_n_len_from_state(state) : seek_start + params.duration_ms/10;
-    __android_log_print(ANDROID_LOG_DEBUG, "whisper", "seek_start %d seek_end %d\n", seek_start, seek_end);
-
+    
     // if length of spectrogram is less than 1s (100 samples), then return
     // basically don't process anything that is less than 1s
     // see issue #39: https://github.com/ggerganov/whisper.cpp/issues/39
@@ -4153,12 +4227,13 @@ int whisper_full_with_state(
     n_decoders = std::max(1, n_decoders);
 
     if (ctx->isStopped) {
-        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 3");
-        whisper_free(ctx);
+                if (params.inferenceStoppedCallback) {
+            params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+        }
+        //whisper_free(ctx);
         return 1;
     } else {
-        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 3");
-    }
+            }
 
     // TAGS: WHISPER_DECODER_INIT
     for (int j = 1; j < n_decoders; j++) {
@@ -4192,28 +4267,30 @@ int whisper_full_with_state(
         std::vector<whisper_token> prompt_tokens;
 
         if (ctx->isStopped) {
-            __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 4");
-            whisper_free(ctx);
+                        if (params.inferenceStoppedCallback) {
+                params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+            }
+            //whisper_free(ctx);
             return 1;
         } else {
-            __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 4");
-        }
+                    }
 
         // initial prompt
         if (!params.prompt_tokens && params.initial_prompt) {
-            prompt_tokens.resize(1024);
+                        prompt_tokens.resize(1024);
             prompt_tokens.resize(whisper_tokenize(ctx, params.initial_prompt, prompt_tokens.data(), prompt_tokens.size()));
             params.prompt_tokens   = prompt_tokens.data();
             params.prompt_n_tokens = prompt_tokens.size();
         }
 
         if (ctx->isStopped) {
-            __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 5");
-            whisper_free(ctx);
+                        if (params.inferenceStoppedCallback) {
+                params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+            }
+            //whisper_free(ctx);
             return 1;
         } else {
-            __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 5");
-        }
+                    }
 
         // prepend the prompt tokens to the prompt_past
         if (params.prompt_tokens && params.prompt_n_tokens > 0) {
@@ -4226,12 +4303,13 @@ int whisper_full_with_state(
     }
 
     if (ctx->isStopped) {
-        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 6");
-        whisper_free(ctx);
+                if (params.inferenceStoppedCallback) {
+            params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+        }
+        //whisper_free(ctx);
         return 1;
     } else {
-        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 6");
-    }
+            }
 
     // overwrite audio_ctx, max allowed is hparams.n_audio_ctx
     if (params.audio_ctx > whisper_n_audio_ctx(ctx)) {
@@ -4241,22 +4319,24 @@ int whisper_full_with_state(
     state->exp_n_audio_ctx = params.audio_ctx;
 
     if (ctx->isStopped) {
-        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 7");
-        whisper_free(ctx);
+                if (params.inferenceStoppedCallback) {
+            params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+        }
+        //whisper_free(ctx);
         return 1;
     } else {
-        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 7");
-    }
+            }
 
     std::vector<whisper_token> prompt_init = { whisper_token_sot(ctx) };
 
     if (ctx->isStopped) {
-        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 8");
-        whisper_free(ctx);
+                if (params.inferenceStoppedCallback) {
+            params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+        }
+        //whisper_free(ctx);
         return 1;
     } else {
-        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 8");
-    }
+            }
 
     // these tokens determine the task that will be performed
     if (whisper_is_multilingual(ctx)) {
@@ -4275,12 +4355,13 @@ int whisper_full_with_state(
 
     std::vector<whisper_token> prompt;
     if (ctx->isStopped) {
-        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 9");
-        whisper_free(ctx);
+                if (params.inferenceStoppedCallback) {
+            params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+        }
+        //whisper_free(ctx);
         return 1;
     } else {
-        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 9");
-    }
+            }
     prompt.reserve(whisper_n_text_ctx(ctx));
 
     // beam-search helpers
@@ -4306,17 +4387,18 @@ int whisper_full_with_state(
     while (true) {
         if (params.progress_callback) {
             if (ctx->isStopped) {
-                __android_log_print(ANDROID_LOG_DEBUG, "whisper", "it is finally necessary in c++\n");
-                whisper_free(ctx);
+                                if (params.inferenceStoppedCallback) {
+                    params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+                }
+                //whisper_free(ctx);
                 return 1;
             } else {
-                __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stage 10 succeeded\n");
-            }
-            const int progress_cur = (seek > seek_end ? seek_end : seek - seek_start) * 100 / (seek_end - seek_start);
-            __android_log_print(ANDROID_LOG_INFO, "Current progress", "%d", progress_cur);
+                            }
+            const int progress_cur = (100*(seek - seek_start))/(seek_end - seek_start);
+
             params.progress_callback(
                     ctx, ctx->state, progress_cur, params.progress_callback_user_data);
-        }
+                    }
 
         // of only 1 second left, then stop
         if (seek + 100 >= seek_end) {
@@ -4325,12 +4407,13 @@ int whisper_full_with_state(
 
         if (params.encoder_begin_callback) {
             if (ctx->isStopped) {
-                __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 11");
-                whisper_free(ctx);
+                                if (params.inferenceStoppedCallback) {
+                    params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+                }
+                //whisper_free(ctx);
                 return 1;
             } else {
-                __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 11");
-            }
+                            }
             if (params.encoder_begin_callback(ctx, state, params.encoder_begin_callback_user_data) == false) {
                 log("%s: encoder_begin_callback returned false - aborting\n", __func__);
                 break;
@@ -4338,12 +4421,13 @@ int whisper_full_with_state(
         }
 
         if (ctx->isStopped) {
-            __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 12");
-            whisper_free(ctx);
+                        if (params.inferenceStoppedCallback) {
+                params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+            }
+            //whisper_free(ctx);
             return 1;
         } else {
-            __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 12");
-        }
+                    }
 
         // encode audio features starting at offset seek
         if (!whisper_encode_internal(*ctx, *state, seek, params.n_threads)) {
@@ -4412,20 +4496,30 @@ int whisper_full_with_state(
                 prompt.clear();
 
                 if (ctx->isStopped) {
-                    __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 13");
-                    whisper_free(ctx);
+                                        if (params.inferenceStoppedCallback) {
+                        params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+                    }
+                    //whisper_free(ctx);
                     return 1;
                 } else {
-                    __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 13");
-                }
+                                    }
 
                 // if we have already generated some text, use it as a prompt to condition the next generation
                 if (!prompt_past.empty() && t_cur < 0.5f && params.n_max_text_ctx > 0) {
-                    int n_take = std::min(std::min(params.n_max_text_ctx, whisper_n_text_ctx(ctx)/2), int(prompt_past.size()));
+                                        int n_take = std::min(std::min(params.n_max_text_ctx, whisper_n_text_ctx(ctx)/2), int(prompt_past.size()));
 
                     prompt = { whisper_token_prev(ctx) };
                     prompt.insert(prompt.begin() + 1, prompt_past.end() - n_take, prompt_past.end());
-                }
+
+                    std::ostringstream oss;
+                    oss << "prompt_past: ";
+                    for (const auto & token : prompt_past) {
+                        const char* decoded_str = whisper_token_to_str(ctx, token);  // Remplacer `ctx` par votre instance de `whisper_context`
+                        if (decoded_str) { // Vérification en cas de pointeur nul
+                            oss << decoded_str << " ";
+                        }
+                    }
+                                    }
 
                 // init new transcription with sot, language (opt) and task tokens
                 prompt.insert(prompt.end(), prompt_init.begin(), prompt_init.end());
@@ -4438,12 +4532,13 @@ int whisper_full_with_state(
                 WHISPER_PRINT_DEBUG("\n\n");
 
                 if (ctx->isStopped) {
-                    __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 14");
-                    whisper_free(ctx);
+                                        if (params.inferenceStoppedCallback) {
+                        params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+                    }
+                    //whisper_free(ctx);
                     return 1;
                 } else {
-                    __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 14");
-                }
+                                    }
 
                 if (!whisper_decode_internal(*ctx, *state, state->decoders[0], prompt.data(), prompt.size(), 0, params.n_threads)) {
                     log("%s: failed to decode\n", __func__);
@@ -4454,12 +4549,13 @@ int whisper_full_with_state(
                     const int64_t t_start_sample_us = ggml_time_us();
 
                     if (ctx->isStopped) {
-                        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 15");
-                        whisper_free(ctx);
+                                                if (params.inferenceStoppedCallback) {
+                            params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+                        }
+                        //whisper_free(ctx);
                         return 1;
                     } else {
-                        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 15");
-                    }
+                                            }
 
                     whisper_process_logits(*ctx, *state, params, state->decoders[0], t_cur);
 
@@ -4483,12 +4579,13 @@ int whisper_full_with_state(
             }
 
             if (ctx->isStopped) {
-                __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 16");
-                whisper_free(ctx);
+                                if (params.inferenceStoppedCallback) {
+                    params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+                }
+                //whisper_free(ctx);
                 return 1;
             } else {
-                __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 16");
-            }
+                            }
 
             for (int i = 0, n_max = whisper_n_text_ctx(ctx)/2 - 4; i < n_max; ++i) {
                 const int64_t t_start_sample_us = ggml_time_us();
@@ -4525,12 +4622,13 @@ int whisper_full_with_state(
                         case whisper_sampling_strategy::WHISPER_SAMPLING_GREEDY:
                         {
                             if (ctx->isStopped) {
-                                __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 17");
-                                whisper_free(ctx);
+                                                                if (params.inferenceStoppedCallback) {
+                                    params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+                                }
+                                //whisper_free(ctx);
                                 return 1;
                             } else {
-                                __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 17");
-                            }
+                                                            }
                             if (t_cur < 1e-6f) {
                                 decoder.sequence.tokens.push_back(whisper_sample_token(*ctx, *state, decoder, true));
                             } else {
@@ -4542,12 +4640,13 @@ int whisper_full_with_state(
                         case whisper_sampling_strategy::WHISPER_SAMPLING_BEAM_SEARCH:
                         {
                             if (ctx->isStopped) {
-                                __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 18");
-                                whisper_free(ctx);
+                                                                if (params.inferenceStoppedCallback) {
+                                    params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+                                }
+                                //whisper_free(ctx);
                                 return 1;
                             } else {
-                                __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 18");
-                            }
+                                                            }
                             const auto tokens_new = whisper_sample_token_topk(*ctx, *state, decoder, params.beam_search.beam_size);
 
                             for (const auto & token : tokens_new) {
@@ -4618,12 +4717,13 @@ int whisper_full_with_state(
                         const auto & token = decoder.sequence.tokens.back();
 
                         if (ctx->isStopped) {
-                            __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 19");
-                            whisper_free(ctx);
+                                                        if (params.inferenceStoppedCallback) {
+                                params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+                            }
+                            //whisper_free(ctx);
                             return 1;
                         } else {
-                            __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 19");
-                        }
+                                                    }
 
                         // timestamp token - update sliding window
                         if (token.id > whisper_token_beg(ctx)) {
@@ -4648,12 +4748,13 @@ int whisper_full_with_state(
                         }
 #endif
                         if (ctx->isStopped) {
-                            __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 20");
-                            whisper_free(ctx);
+                                                        if (params.inferenceStoppedCallback) {
+                                params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+                            }
+                            //whisper_free(ctx);
                             return 1;
                         } else {
-                            __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 20");
-                        }
+                                                    }
                         // end of segment
                         if (token.id == whisper_token_eot(ctx) ||               // end of text token
                             (params.max_tokens > 0 && i >= params.max_tokens) || // max tokens per segment reached
@@ -4678,12 +4779,13 @@ int whisper_full_with_state(
                         }
 
                         if (ctx->isStopped) {
-                            __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 21");
-                            whisper_free(ctx);
+                                                        if (params.inferenceStoppedCallback) {
+                                params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+                            }
+                            //whisper_free(ctx);
                             return 1;
                         } else {
-                            __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 21");
-                        }
+                                                    }
 
                         // TESTS: if no tensors are loaded, it means we are running tests
                         if (ctx->model.n_loaded == 0) {
@@ -4735,12 +4837,13 @@ int whisper_full_with_state(
 
                     //WHISPER_PRINT_DEBUG("%s: decoder %d: token %d, kv_self.n %d, seek_delta %d\n", __func__, j, decoder.tokens_tmp[0], decoder.kv_self.n, decoder.seek_delta);
                     if (ctx->isStopped) {
-                        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 22");
-                        whisper_free(ctx);
+                                                if (params.inferenceStoppedCallback) {
+                            params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+                        }
+                        //whisper_free(ctx);
                         return 1;
                     } else {
-                        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 22");
-                    }
+                                            }
                     if (!whisper_decode_internal(*ctx, *state, decoder, decoder.tokens_tmp.data(), decoder.tokens_tmp.size(), decoder.kv_self.n, params.n_threads)) {
                         log("%s: failed to decode\n", __func__);
                         return -8;
@@ -4750,12 +4853,13 @@ int whisper_full_with_state(
                         const int64_t t_start_sample_us = ggml_time_us();
 
                         if (ctx->isStopped) {
-                            __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 23");
-                            whisper_free(ctx);
+                                                        if (params.inferenceStoppedCallback) {
+                                params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+                            }
+                            //whisper_free(ctx);
                             return 1;
                         } else {
-                            __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 23");
-                        }
+                                                    }
 
                         whisper_process_logits(*ctx, *state, params, decoder, t_cur);
 
@@ -4843,12 +4947,13 @@ int whisper_full_with_state(
             // update prompt_past
             prompt_past.clear();
             if (ctx->isStopped) {
-                __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 24");
-                whisper_free(ctx);
+                                if (params.inferenceStoppedCallback) {
+                    params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+                }
+                //whisper_free(ctx);
                 return 1;
             } else {
-                __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 24");
-            }
+                            }
             if (prompt.front() == whisper_token_prev(ctx)) {
                 prompt_past.insert(prompt_past.end(), prompt.begin() + 1, prompt.end() - prompt_init.size());
             }
@@ -4857,12 +4962,13 @@ int whisper_full_with_state(
                 prompt_past.push_back(tokens_cur[i].id);
             }
             if (ctx->isStopped) {
-                __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 25");
-                whisper_free(ctx);
+                                if (params.inferenceStoppedCallback) {
+                    params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+                }
+                //whisper_free(ctx);
                 return 1;
             } else {
-                __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 25");
-            }
+                            }
             if (!tokens_cur.empty() && ctx->model.n_loaded > 0) {
                 int  i0 = 0;
                 auto t0 = seek + 2*(tokens_cur.front().tid - whisper_token_beg(ctx));
@@ -4871,12 +4977,13 @@ int whisper_full_with_state(
                 bool speaker_turn_next = false;
 
                 if (ctx->isStopped) {
-                    __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 26");
-                    whisper_free(ctx);
+                                        if (params.inferenceStoppedCallback) {
+                        params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+                    }
+                    //whisper_free(ctx);
                     return 1;
                 } else {
-                    __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 26");
-                }
+                                    }
 
                 for (int i = 0; i < (int) tokens_cur.size(); i++) {
                     //printf("%s: %18s %6.3f %18s %6.3f\n", __func__,
@@ -4921,8 +5028,21 @@ int whisper_full_with_state(
                                 whisper_exp_compute_token_level_timestamps(
                                         *ctx, *state, result_all.size() - 1, params.thold_pt, params.thold_ptsum);
 
+                                
                                 if (params.max_len > 0) {
-                                    n_new = whisper_wrap_segment(*ctx, *state, params.max_len, params.split_on_word);
+                                    n_new = whisper_wrap_segment(*ctx, *state, params.max_len, params.split_on_word, params.split_on_punctuation);
+                                    /*if (!state->result_all.empty()) {
+                                        auto & segment = state->result_all.back(); // Accès au dernier segment
+
+                                        // Utilisation de segment.t0 et segment.t1 pour les timestamps
+                                        std::string t_beg_str = formatTimestamp(segment.t0);
+                                        std::string t_last_str = formatTimestamp(segment.t1);
+
+                                        std::string timestamps = "[" + std::to_string(state->t_beg / 100.0) + "-" + std::to_string(state->t_last / 100.0) + "] ";
+                                        std::string original_text = segment.text;
+                                        // Faites vos modifications ici
+                                        segment.text = timestamps + " " + original_text;
+                                                                            }*/
                                 }
                             }
                             if (params.new_segment_callback) {
@@ -4963,19 +5083,33 @@ int whisper_full_with_state(
                     int n_new = 1;
 
                     if (ctx->isStopped) {
-                        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Stopped at Stage 27");
-                        whisper_free(ctx);
+                                                if (params.inferenceStoppedCallback) {
+                            params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
+                        }
+                        //whisper_free(ctx);
                         return 1;
                     } else {
-                        __android_log_print(ANDROID_LOG_DEBUG, "whisper", "Started at Stage 27");
-                    }
+                                            }
 
                     if (params.token_timestamps) {
                         whisper_exp_compute_token_level_timestamps(
                                 *ctx, *state, result_all.size() - 1, params.thold_pt, params.thold_ptsum);
 
+                        
                         if (params.max_len > 0) {
-                            n_new = whisper_wrap_segment(*ctx, *state, params.max_len, params.split_on_word);
+                            n_new = whisper_wrap_segment(*ctx, *state, params.max_len, params.split_on_word, params.split_on_punctuation);
+                            /*if (!state->result_all.empty()) {
+                                auto & segment = state->result_all.back(); // Accès au dernier segment
+
+                                // Utilisation de segment.t0 et segment.t1 pour les timestamps
+                                std::string t_beg_str = formatTimestamp(segment.t0);
+                                std::string t_last_str = formatTimestamp(segment.t1);
+
+                                std::string timestamps = "[" + std::to_string(state->t_beg / 100.0) + "-" + std::to_string(state->t_last / 100.0) + "] ";
+                                std::string original_text = segment.text;
+                                // Faites vos modifications ici
+                                segment.text = timestamps + " " + original_text;
+                                                            }*/
                         }
                     }
                     if (params.new_segment_callback) {
@@ -4987,8 +5121,7 @@ int whisper_full_with_state(
             // update audio window
             seek += seek_delta;
 
-            __android_log_print(ANDROID_LOG_INFO, "WHISPER", "seek = %d, seek_delta = %d\n", seek, seek_delta);
-        }
+                    }
     }
 
     return 0;
@@ -5489,7 +5622,6 @@ static void whisper_exp_compute_token_level_timestamps(
     auto & t_beg    = state.t_beg;
     auto & t_last   = state.t_last;
     auto & tid_last = state.tid_last;
-
     for (int j = 0; j < n; ++j) {
         auto & token = tokens[j];
 

@@ -8,14 +8,17 @@ class OnboardingAdapter(fragmentActivity: FragmentActivity) :
     FragmentStateAdapter(fragmentActivity) {
 
     override fun getItemCount(): Int {
-        return 3 // Nombre de pages dans le didacticiel
+        return 6 // Nombre de pages dans le didacticiel
     }
 
     override fun createFragment(position: Int): Fragment {
         return when (position) {
-            0 -> PermissionExplanationFragment() // Explication et demande de permissions
-            1 -> NotificationExplanationFragment() // Explication et activation des notifications
-            2 -> ModelSelectionFragment() // Sélection et téléchargement du modèle
+            0 -> WelcomeFragment() // Accueil
+            1 -> PermissionExplanationFragment() // Explication et demande de permissions
+            2 -> NotificationExplanationFragment() // Explication et activation des notifications
+            3 -> ModelSelectionFragment() // Sélection et téléchargement du modèle
+            4 -> DictionaryFragment()
+            5 -> SettingsFragment()
             else -> throw IllegalArgumentException("Position invalide")
         }
     }

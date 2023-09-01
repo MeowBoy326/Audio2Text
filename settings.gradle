@@ -8,6 +8,11 @@ pluginManagement {
             url = "https://mvn.0110.be/releases"
         }
     }
+
+
+    plugins {
+        id 'org.gradle.toolchains.foojay-resolver-convention' version '0.4.0'
+    }
 }
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
@@ -20,5 +25,6 @@ dependencyResolutionManagement {
         }
     }
 }
+
 rootProject.name = "Audio2Text"
 include ':app'

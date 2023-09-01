@@ -1,6 +1,5 @@
 package com.example.audio2text
 
-import android.annotation.SuppressLint
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -9,43 +8,49 @@ import android.content.ContentValues.TAG
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+import android.os.Build
 import android.os.CancellationSignal
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
 import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
-import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import androidx.core.content.ContextCompat.getSystemService
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegSession
 import com.arthenica.ffmpegkit.ReturnCode
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.util.UUID
-import java.util.concurrent.Executors
-import android.content.Context.RECEIVER_NOT_EXPORTED
-import androidx.core.content.ContextCompat
+
 
 class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
     CoroutineWorker(context, parameters) {
-
+    private var totalDurationInSeconds: Long = 0
+    private var selectedLanguage: String = "auto"
+    private var selectedLanguageToIgnore: String = ""
+    private var segmentLength: Int = 30
+    private var translate: Boolean = false
+    private var speed: Boolean = false
+    private var initialPrompt: String = ""
     private var currentSegmentIndex: Int = 0
+    private var startTimeInSeconds: Int = 0
+    private var endTimeInSeconds: Int = 0
+    private var maxSize: Int = 1000
     private var partialProgress: Int = 0
     private val NOTIFICATION_ID_FINISHED = 2
     private var isServiceBeingDestroyed = false
@@ -54,14 +59,44 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
     private val ACTION_UPDATE_PROGRESS = "com.example.action.UPDATE_PROGRESS"
     private val cancellationSignal = CancellationSignal()
     val fullTranscription = StringBuilder()
+    val workId = id
+
+    val stopTranscriptionIntent =
+        Intent(applicationContext, StopTranscriptionReceiver::class.java).apply {
+            action = "STOP_TRANSCRIPTION"
+            putExtra("WORK_ID", workId.toString())
+        }
+
+    val stopTranscriptionPendingIntent = PendingIntent.getBroadcast(
+        applicationContext,
+        0,
+        stopTranscriptionIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        val notification = createNotification(
+            applicationContext,
+            id, // L'UUID de ce Worker
+            "Transcription en cours", // Le titre de la notification
+            showProgress = true,
+            progress = 0, // La valeur initiale de la progression
+            stopTranscriptionPendingIntent = stopTranscriptionPendingIntent
+        )
+
+        return ForegroundInfo(NOTIFICATION_ID, notification, FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+    }
 
     companion object {
-        private val job = Job()
-        private val scope = CoroutineScope(Dispatchers.Default + job)
+        //private lateinit var wakeLock: PowerManager.WakeLock
+        private var isReceiverRegistered = false
+        private lateinit var job: Job
+        private lateinit var scope: CoroutineScope
         private val stopTranscriptionReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 if (intent != null) {
                     if (intent.action == "STOP_TRANSCRIPTION") {
+                        Log.d("Whisper", "Call to stop")
                         scope.launch {
                             releaseResources(context!!, true)
                         }
@@ -69,134 +104,167 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
                 }
             }
         }
+
+
+        private fun saveTranscription(context: Context, transcriptionText: String) {
+            val values = ContentValues()
+            values.put("transcription", transcriptionText)
+            val uri = TranscriptionContentProvider.CONTENT_URI
+            context.contentResolver.insert(uri, values)
+        }
+
         var whisperContext: WhisperContext? = null
         private lateinit var notificationManager: NotificationManager
 
-        private val NOTIFICATION_ID = 1
-
-        private val CHANNEL_ID = "transcription_channel"
+        const val NOTIFICATION_ID = 42
+        private var reachInference = false
         suspend fun releaseResources(context: Context, stopped: Boolean) {
+            Log.d("Whisper", "Inside releaseRessources fonction : $reachInference")
+            notificationManager.cancel(NOTIFICATION_ID)
             // Libérer les ressources ici
-            if (stopped) {
-                whisperContext?.stopProcess()
+            if (stopped && reachInference) {
+                val showText =
+                    "Arrêt en cours. Veuillez patienter..."
+                Log.d("Whisper", "Call to stop during inference")
+                saveTranscription(context, showText)
+            } else if (!reachInference) {
+                val preferences =
+                    context.getSharedPreferences("MyPreferences", Context.MODE_PRIVATE)
+                preferences.edit().putBoolean("stoppedBeforeInference", true).apply()
             }
-            context.unregisterReceiver(stopTranscriptionReceiver)
+            whisperContext?.stopProcess()
+            whisperContext?.release()
+            // Lors de la désinscription
+            if (isReceiverRegistered) {
+                try {
+                    context.unregisterReceiver(stopTranscriptionReceiver)
+                } catch (e: IllegalArgumentException) {
+                    // Le récepteur n'était pas enregistré, ignorez l'exception
+                }
+                isReceiverRegistered = false
+            }
+            job.cancel()
+
+            //wakeLock.release()
             // Libérer les ressources ici
             Log.d("Whisper", "Inside releaseRessources fonction")
-            notificationManager.cancel(NOTIFICATION_ID)
-            whisperContext!!.release()
         }
     }
 
-    val workId = id
+    private val inferenceStoppedListener = object : InferenceStoppedListener {
+        override fun onInferenceStopped() {
+            Log.d("Whisper", "Inference stopped in listener")
+            val showText = ""
 
-    val stopTranscriptionIntent = Intent(applicationContext, StopTranscriptionReceiver::class.java).apply {
-        action = "STOP_TRANSCRIPTION"
-        putExtra("WORK_ID", workId.toString())
+            saveTranscription(applicationContext, showText)
+            // Réactivez le bouton ici
+            /*CoroutineScope(Dispatchers.Main).launch {
+                ButtonState.enableButton()
+            }*/
+            val preferences =
+                applicationContext.getSharedPreferences("MyPreferences", Context.MODE_PRIVATE)
+            preferences.edit().putBoolean("isGoingToStop", false).apply()
+            preferences.edit().putBoolean("isFullyStopped", true).apply()
+        }
     }
-    val stopTranscriptionPendingIntent = PendingIntent.getBroadcast(
-        applicationContext,
-        0,
-        stopTranscriptionIntent,
-        PendingIntent.FLAG_UPDATE_CURRENT
-    )
+
+    //private val _progress = MutableStateFlow(0)
+    //val progress: StateFlow<Int> = _progress
 
     @OptIn(DelicateCoroutinesApi::class)
     val progressListener = object : TranscriptionProgressListener {
-        override fun onTranscriptionProgress(progress: Int) {
-            /*if (isStopped) {
-                Log.d("Whisper", "Call to stop")
-                // Le travail a été annulé, libérer les ressources
-                /*GlobalScope.launch {
-                    releaseResources()
-                }*/
-                //Log.d("Whisper", "Call to releaseRessources")
-                //notificationManager.cancel(NOTIFICATION_ID)
-                return
-            }*/
+        override suspend fun onTranscriptionProgress(progress: Int) {
             val startTime = System.currentTimeMillis()
 
             Log.d("Progress update", progress.toString())
-            val global_progress = ((currentSegmentIndex + progress / 100.0) / segments_size) * 100
+            global_progress =
+                (((currentSegmentIndex + progress / 100.0) / segments_size) * 100).toInt()
             Log.d("Progress update", global_progress.toString())
 
-            // Mettre à jour la progression dans la notification
-            val notificationProgress = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+            Log.d("Whisper", "Call to setForeground")
+            if (global_progress == 99) {
+                global_progress = 100
+            }
+
+            /*val notificationProgress = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
                 .setContentTitle("Transcription en cours")
                 .setSmallIcon(R.drawable.notification_icon)
                 .setOngoing(true)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                .setProgress(100, global_progress.toInt(), false)
+                .setProgress(100, global_progress, false)
                 .addAction(
                     R.drawable.stop_icon, // Icône pour le bouton
                     "Stop",
                     stopTranscriptionPendingIntent // Intent à déclencher lors du clic sur le bouton
                 )
-                .build()
+                .build()*/
 
-            notificationManager.notify(NOTIFICATION_ID, notificationProgress)
+            notificationManager.notify(
+                NOTIFICATION_ID,
+                createNotification(
+                    applicationContext,
+                    workId,
+                    "Transcription en cours",
+                    showProgress = true,
+                    progress = global_progress
+                )
+            )
+
             val endTime = System.currentTimeMillis()
             Log.d(TAG, "Temps d'exécution pour le callback: ${endTime - startTime} ms")
+        }
+
+        override fun onTranscriptionProgressNonSuspend(progress: Int) {
+            scope.launch {
+                onTranscriptionProgress(progress)
+            }
         }
     }
 
     @OptIn(DelicateCoroutinesApi::class)
     val segmentListener = object : TranscriptionSegmentListener {
         override fun onNewSegment(segment: String) {
-            /*if (isStopped) {
-                Log.d("Whisper", "Call to stop in segment listener")
-                whisperContext?.stopProcess()
-                Log.d("Whisper", "Call to stop")
-                return
-            }*/
-            /*if (isStopped) {
-                Log.d("Whisper", "Call to stop")
-                // Le travail a été annulé, libérer les ressources
-                GlobalScope.launch {
-                    releaseResources()
-                }
-                Log.d("Whisper", "Call to releaseRessources")
-                notificationManager.cancel(NOTIFICATION_ID)
-                return
-            }*/
-            fullTranscription.append(segment.trim() + "\n")
-            val values = ContentValues().apply {
-                put("transcription", fullTranscription.toString())
-            }
-            applicationContext.contentResolver.insert(TranscriptionContentProvider.CONTENT_URI, values)
-            /*val updateIntent = Intent("com.example.audio2text.TRANSCRIPTION_UPDATE")
-            updateIntent.putExtra("transcription", fullTranscription.toString())
-            LocalBroadcastManager.getInstance(applicationContext)
-                .sendBroadcast(updateIntent)*/
+            fullTranscription.append(segment.trim() + " ")
+            saveTranscription(applicationContext, fullTranscription.toString())
         }
     }
 
-    @SuppressLint("SetTextI18n")
-    private suspend fun loadModel() = withContext(Dispatchers.IO) {
-        var showText = "Chargement du modèle..."
+    private fun loadModel() {
+        val showText = "Chargement du modèle..."
 
-        // Mettre à jour le ContentProvider avec le nouveau texte
-        val values = ContentValues().apply {
-            put("transcription", showText)
-        }
-        applicationContext.contentResolver.insert(TranscriptionContentProvider.CONTENT_URI, values)
+        saveTranscription(applicationContext, showText)
 
         // Récupérer le chemin du fichier à partir des préférences partagées
-        val preferences = applicationContext.getSharedPreferences("MyPreferences", Context.MODE_PRIVATE)
-        val filePath = preferences.getString(MainActivity.modelPath, null)
+        val preferences =
+            applicationContext.getSharedPreferences("MyPreferences", Context.MODE_PRIVATE)
+        val filePath = preferences.getString("whisper_model", null)
+        selectedLanguage = preferences.getString("languageCode", null)!!
+        selectedLanguageToIgnore = preferences.getString("languageIgnored", null)!!
+        translate = preferences.getBoolean("translate", false)
+        speed = preferences.getBoolean("speed", false)
+        segmentLength = preferences.getInt("segmentLength", 30)
+        initialPrompt = preferences.getString("initialPrompt", "")!!
+        startTimeInSeconds = preferences.getInt("startTime", 0)
+        endTimeInSeconds = preferences.getInt("endTime", 0)
+        maxSize = preferences.getInt("maxTextSize", 1000)
+
+        Log.d("Whisper", "Path to model: $filePath")
 
         if (filePath != null && File(filePath).exists()) {
             try {
-                whisperContext = WhisperContext.createContextFromFile(filePath)
-                withContext(Dispatchers.Main) {
-                    showText = "Le modèle a été chargé avec succès ! La transcription est en cours et va s'afficher bientôt. Veuillez patienter..."
+                Log.d("Whisper", "Loading model from $filePath")
+                whisperContext = filePath.let {
+                    WhisperContext.createContextFromFile(
+                        it
+                    )
+                }
 
-                    // Mettre à jour le ContentProvider avec le nouveau texte
-                    val valuesShown = ContentValues().apply {
-                        put("transcription", showText)
-                    }
-                    applicationContext.contentResolver.insert(TranscriptionContentProvider.CONTENT_URI, valuesShown)
+                val showText2 =
+                    "Le modèle a été chargé avec succès ! La transcription est en cours et va s'afficher bientôt. Veuillez patienter..."
 
+                saveTranscription(applicationContext, showText2)
+
+                Handler(Looper.getMainLooper()).post {
                     Toast.makeText(
                         applicationContext,
                         "Le modèle a été chargé avec succès !",
@@ -204,22 +272,24 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
                     ).show()
                 }
             } catch (e: Exception) {
+                Log.d("Whisper", "Error loading model: ${e.message}")
                 // Gérer l'erreur de chargement du modèle ici
-                withContext(Dispatchers.Main) {
+                Handler(Looper.getMainLooper()).post {
                     Toast.makeText(
                         applicationContext,
                         "Erreur lors du chargement du modèle : ${e.message}",
-                        Toast.LENGTH_LONG
+                        Toast.LENGTH_SHORT
                     ).show()
                 }
             }
         } else {
+            Log.d("Whisper", "Model file not found at $filePath")
             // Gérer l'erreur si le chemin du fichier est null ou si le fichier n'existe pas
-            withContext(Dispatchers.Main) {
+            Handler(Looper.getMainLooper()).post {
                 Toast.makeText(
                     applicationContext,
                     "Le fichier de modèle est introuvable. Veuillez réessayer.",
-                    Toast.LENGTH_LONG
+                    Toast.LENGTH_SHORT
                 ).show()
             }
         }
@@ -238,21 +308,25 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
         }
 
         val command = arrayOf(
-            "-y",              // Écrase le fichier de sortie s'il existe
-            "-i", "\"$inputFilePath\"", // Fichier d'entrée (peut être vidéo ou audio)
-            "-af", "loudnorm=I=-16:LRA=11:TP=-1.5", // Applique la normalisation du volume
-            "-vn",             // Supprime la piste vidéo (si le fichier d'entrée est une vidéo)
-            "-ar", "16000",    // Définit la fréquence d'échantillonnage à 16 kHz
-            "-ac", "1",        // Définit le nombre de canaux audio à 1 (mono)
-            "\"$outputFilePath\"" // Fichier de sortie
-        ).joinToString(" ")
+            "-y",
+            "-i", "\"$inputFilePath\"",
+            "-af", "loudnorm=I=-16:LRA=11:TP=-1.5",
+            "-vn",
+            "-ar", "16000",
+            "-ac", "1",
+            "-c:a", "pcm_s16le",
+            "\"$outputFilePath\""
+        ).filter { it.isNotEmpty() }.joinToString(" ")
 
         Log.d(ContentValues.TAG, "Starting audio conversion with command: $command")
+
+        val showText = "Conversion de la piste audio en WAV..."
+        saveTranscription(applicationContext, showText)
 
         val result = executeFFmpegCommandAsync(
             command,
             outputFilePath,
-            "The Message.wav",
+            outputFile.name,
             cancellationSignal,
             applicationContext
         )
@@ -269,30 +343,26 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
         outputFileName: String,
         cancellationSignal: CancellationSignal,
         context: Context
-    ): Boolean =
-        suspendCancellableCoroutine { continuation ->
+    ): Boolean = suspendCancellableCoroutine { continuation ->
+        if (continuation.isActive) {
             val session = FFmpegKit.executeAsync(command) { session: FFmpegSession ->
                 val returnCode = session.returnCode.value
-
                 if (returnCode == ReturnCode.SUCCESS) {
-                    // Copy the file to external storage
-                    //val uri = saveFileToExternalStorage(context, inputFilePath, outputFileName)
-                    //Log.d(TAG, "File saved to external storage at $uri")
-                    continuation.resume(true) { }
+                    continuation.resume(true) {}
                 } else {
-                    continuation.resume(false) { }
+                    continuation.resume(false) {}
                 }
             }
 
             cancellationSignal.setOnCancelListener {
                 session.cancel()
-                continuation.resume(false) { }
             }
 
             continuation.invokeOnCancellation {
                 cancellationSignal.cancel()
             }
         }
+    }
 
 
     fun decodeWaveFile(file: File): FloatArray {
@@ -315,20 +385,32 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
         }
     }
 
-    fun splitAudioIntoSegments(file: File): List<FloatArray> {
+    fun splitAudioIntoSegments(
+        file: File,
+        originalSegmentDurationInSeconds: Int
+    ): List<FloatArray> {
         val sampleRate = 16000
-        val segmentDurationInSeconds = 30
-        val samplesPerSegment = sampleRate * segmentDurationInSeconds
+        var segmentDurationInSeconds = originalSegmentDurationInSeconds
         val segments = mutableListOf<FloatArray>()
 
         FileInputStream(file).use { fis ->
             val header = ByteArray(44)
-            fis.read(header) // Read WAV file header
+            fis.read(header) // Lire l'en-tête du fichier WAV
             val buffer = ByteBuffer.wrap(header)
             buffer.order(ByteOrder.LITTLE_ENDIAN)
             val channel = buffer.getShort(22).toInt()
             val bytesPerSample = buffer.getShort(34).toInt() / 8
-            val chunkSize = 4096 // Chunk size to read at each iteration
+            val fileSize = fis.channel.size()
+            val audioSize = fileSize - 44
+            val totalSamples = audioSize / (bytesPerSample * channel)
+            totalDurationInSeconds = totalSamples / sampleRate
+
+            if (segmentDurationInSeconds > totalDurationInSeconds) {
+                segmentDurationInSeconds = totalDurationInSeconds.toInt()
+            }
+
+            val samplesPerSegment = sampleRate * segmentDurationInSeconds
+            val chunkSize = 4096
 
             var segment = FloatArray(samplesPerSegment) { 0f }
             var segmentIndex = 0
@@ -355,9 +437,7 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
                 }
             }
 
-            // Ajouter le dernier segment, même s'il est plus court
             if (segmentIndex > 0) {
-                // Si le dernier segment est plus court que la taille requise, le couper à la taille réelle
                 segments.add(segment.copyOfRange(0, segmentIndex))
             }
         }
@@ -365,26 +445,38 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
         return segments
     }
 
-    private fun createForegroundInfo(message: String): ForegroundInfo {
-        // Créez votre notification ici
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setContentTitle(message)
-            .setSmallIcon(R.drawable.notification_icon)
-            .setOngoing(true)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .build()
-
-        return ForegroundInfo(NOTIFICATION_ID, notification)
-    }
-
     override suspend fun doWork(): Result {
+        //val pm = applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager?
+        //wakeLock = pm!!.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MyApp::MyWakelockTag")
+        //wakeLock.acquire()
+        val preferences =
+            applicationContext.getSharedPreferences("MyPreferences", Context.MODE_PRIVATE)
+        preferences.edit().putBoolean("isFullyStopped", false).apply()
+        preferences.edit().putBoolean("isFullySuccessful", false).apply()
+        preferences.edit().putBoolean("isRunning", true).apply()
+
+        job = Job()
+        scope = CoroutineScope(Dispatchers.IO + job)
+
+        notificationManager =
+            applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
         // Enregistrer le BroadcastReceiver
         val filter = IntentFilter().apply {
             addAction("STOP_TRANSCRIPTION")
         }
-        ContextCompat.registerReceiver(applicationContext, stopTranscriptionReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
-        notificationManager =
-            applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (!isReceiverRegistered) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                applicationContext.registerReceiver(
+                    stopTranscriptionReceiver,
+                    filter,
+                    Context.RECEIVER_NOT_EXPORTED
+                )
+            } else {
+                applicationContext.registerReceiver(stopTranscriptionReceiver, filter)
+            }
+            isReceiverRegistered = true
+        }
 
         val audioFilePath = inputData.getString("audioFilePath") ?: return Result.failure()
         val fileNameWithoutExtension =
@@ -393,7 +485,7 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
         val outputFile = File(applicationContext.filesDir, outputFileName)
         val outputFilePath = outputFile.absolutePath
 
-        setForeground(createForegroundInfo("Transcription en cours"))
+        //setForeground(createForegroundInfo("Transcription en cours"))
 
         return try {
             // Conversion de l'audio en WAV
@@ -401,32 +493,65 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
                 loadModel()
                 whisperContext?.setProgressCallback(progressListener)
                 whisperContext?.setSegmentCallback(segmentListener)
-                val segments = splitAudioIntoSegments(outputFile)
-                //fullTranscription.append("Résultat de la transcription :\n\n")
-                //val fullText = whisperContext?.transcribeData(audioData)
-                //Log.d("Final of final", fullText!!)
+                whisperContext?.setInferenceStoppedCallback(inferenceStoppedListener)
+                //scope.launch {
+                //    progress.collect { progressValue ->
+                if (!isStopped) {
+                    setForegroundAsync(getForegroundInfo())
+                } else {
+                    Result.failure()
+                }
+                //    }
+                //}
+                val segments = splitAudioIntoSegments(outputFile, segmentLength)
                 segments_size = segments.size
                 fullTranscription.append("Résultat de la transcription :\n\n")
-                for (segment in segments) {
-                    /*if (isStopped) {
-                        whisperContext?.stopProcess()
-                        Log.d("Whisper", "Call to stop")
-                        //outputFile.delete()
-                        return Result.failure()
-                    }*/
-                    val textSegment = whisperContext?.transcribeData(segment)
-                    Log.d("Whisper", textSegment.toString())
-                    //fullTranscription.append(textSegment)
-                    /*val values = ContentValues().apply {
-                        put("transcription", fullTranscription.toString())
-                    }
-                    applicationContext.contentResolver.insert(TranscriptionContentProvider.CONTENT_URI, values)*/
-                    /*val updateIntent = Intent("com.example.audio2text.TRANSCRIPTION_UPDATE")
-                    updateIntent.putExtra("transcription", fullTranscription.toString())
-                    LocalBroadcastManager.getInstance(applicationContext)
-                        .sendBroadcast(updateIntent)*/
-                    currentSegmentIndex++
+                reachInference = true
+                //var contextPrompt = initialPrompt
+
+                var offset_ms = 0
+                var duration_ms = 0
+
+                if (startTimeInSeconds >= 0 && endTimeInSeconds <= totalDurationInSeconds && startTimeInSeconds < endTimeInSeconds) {
+                    offset_ms = startTimeInSeconds * 1000  // Convertir en millisecondes
+                    duration_ms =
+                        (endTimeInSeconds - startTimeInSeconds) * 1000  // Convertir en millisecondes
+                } else if (startTimeInSeconds >= 0 && startTimeInSeconds < totalDurationInSeconds && endTimeInSeconds > totalDurationInSeconds) {
+                    offset_ms = startTimeInSeconds * 1000  // Convertir en millisecondes
+                    duration_ms =
+                        (totalDurationInSeconds.toInt() - startTimeInSeconds) * 1000  // Convertir en millisecondes
+                } else if (startTimeInSeconds == endTimeInSeconds) {
+                    // Si les deux sont égaux, on mettra offset et duration à 0
+                    offset_ms = 0
+                    duration_ms = 0
                 }
+
+                Log.d("Whisper", "offset_ms: $offset_ms")
+                Log.d("Whisper", "duration_ms: $duration_ms")
+
+                for (segment in segments) {
+                    val textSegment = whisperContext?.transcribeData(
+                        segment,
+                        selectedLanguage,
+                        selectedLanguageToIgnore,
+                        translate,
+                        speed,
+                        initialPrompt,  // Utilisation de initialPrompt ici
+                        maxSize,
+                        offset_ms,
+                        duration_ms
+                    )
+
+                    Log.d("Whisper", textSegment.toString())
+                    currentSegmentIndex++
+
+                    // Mettre à jour initialPrompt pour le prochain segment
+                    /*if (textSegment != null) {
+                        contextPrompt = textSegment.trim()
+                    }*/
+                    fullTranscription.append("\n\n")
+                }
+                reachInference = false
                 Result.success()
             } else {
                 Result.failure()
@@ -435,7 +560,7 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
             Log.e(TAG, "Erreur lors de la transcription", e)
             Result.failure()
         } finally {
-            Log.d("Whisper","Call to finally")
+            Log.d("Whisper", "Call to finally")
             outputFile.delete()
             releaseResources(applicationContext, false)
         }

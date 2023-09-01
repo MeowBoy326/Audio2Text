@@ -7,20 +7,26 @@
     <RelativeLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:paddingBottom="150dp"
-        android:background="#000000"
-        android:paddingTop="150dp">
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="50dp">
 
         <TextView
             android:id="@+id/textModelSelection"
-            android:layout_width="300dp"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_alignParentTop="true"
             android:layout_centerHorizontal="true"
             android:textAlignment="center"
-            android:textColor="@color/white"
+            android:layout_alignParentTop="true"
             android:text="Veuillez choisir un modèle pour continuer."
-            android:textSize="30sp" />
+            android:textSize="25sp" />
+
+        <ImageView
+            android:id="@+id/thunder_logo"
+            android:layout_width="150dp"
+            android:layout_height="150dp"
+            android:layout_centerHorizontal="true"
+            android:layout_centerInParent="true"
+            android:src="@drawable/thunder_icon" />
 
         <ProgressBar
             android:id="@+id/progressBar"
@@ -29,10 +35,9 @@
             android:layout_height="wrap_content"
             android:layout_centerInParent="true"
             android:indeterminate="false"
+            android:layout_below="@id/thunder_logo"
             android:progressBackgroundTintMode="src_atop"
             android:padding="50dp"
-            android:progressTint="@color/green"
-            android:progressBackgroundTint="@color/white"
             android:visibility="gone"/>
 
         <RadioGroup
@@ -40,32 +45,35 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_centerInParent="true"
-            android:orientation="vertical">
+            android:layout_marginTop="50dp"
+            android:checkedButton="@id/mediumModel"
+            android:layout_below="@id/thunder_logo"
+            android:orientation="horizontal">
 
             <RadioButton
                 android:id="@+id/rapidModel"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="@color/white"
-                android:buttonTint="@color/white"
-                android:text="Rapide (145 Mo)" />
+                android:padding="10dp"
+                android:textAlignment="center"
+                android:text="Rapide\n(148 Mo)" />
 
             <RadioButton
                 android:id="@+id/mediumModel"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="@color/white"
-                android:buttonTint="@color/white"
-                android:text="Moyen (477 Mo)"
+                android:padding="10dp"
+                android:textAlignment="center"
+                android:text="Moyen\n(488 Mo)"
                 android:checked="true" />
 
             <RadioButton
                 android:id="@+id/preciseModel"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="@color/white"
-                android:buttonTint="@color/white"
-                android:text="Précis (1.5 Go)" />
+                android:padding="10dp"
+                android:textAlignment="center"
+                android:text="Précis\n(1.53 Go)" />
         </RadioGroup>
 
         <Button
@@ -75,24 +83,23 @@
             android:layout_alignParentBottom="true"
             android:layout_centerHorizontal="true"
             android:layout_margin="16dp"
-            android:textColor="@color/black"
-            android:backgroundTint="@color/white"
+            android:textColor="@color/button_text_color"
             android:text="Télécharger" />
 
-
-
         <com.google.android.material.floatingactionbutton.FloatingActionButton
-            android:id="@+id/nextArrow"
+            android:id="@+id/nextArrow3"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_alignParentEnd="true"
             android:layout_alignParentBottom="true"
+            android:layout_margin="16dp"
             app:maxImageSize="56dp"
             app:fabCustomSize="56dp"
-            android:layout_margin="16dp"
-            android:visibility="gone"
+            app:elevation="6dp"
+            app:pressedTranslationZ="12dp"
             android:src="@drawable/right_arrow"
-            app:tint="@color/white" />
+            android:visibility="gone"
+            app:tint="#CEE8FA"/>
     </RelativeLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

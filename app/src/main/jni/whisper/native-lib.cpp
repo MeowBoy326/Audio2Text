@@ -35,6 +35,7 @@ struct input_stream_context {
 // Global variable to hold the callback object
 jobject g_progressCallback = nullptr;
 jobject g_segmentCallback = nullptr;
+jobject g_inferenceStoppedCallback = nullptr;
 //bool g_isStopped = false;
 
 size_t inputStreamRead(void * ctx, void * output, size_t read_size) {
@@ -83,7 +84,7 @@ void reportProgress(JNIEnv *env, int progress) {
         __android_log_print(ANDROID_LOG_INFO, "Whisper", "send to progress : %d", progress);
         jclass callbackClass = env->GetObjectClass(g_progressCallback);
         __android_log_print(ANDROID_LOG_INFO, "Whisper", "created callback Class");
-        jmethodID methodId = env->GetMethodID(callbackClass, "onTranscriptionProgress", "(I)V");
+        jmethodID methodId = env->GetMethodID(callbackClass, "onTranscriptionProgressNonSuspend", "(I)V");
         env->CallVoidMethod(g_progressCallback, methodId, progress);
     }
 }
@@ -97,6 +98,17 @@ void reportSegment(JNIEnv *env, jstring segment) {
         jmethodID methodId = env->GetMethodID(callbackClass, "onNewSegment",
                                                  "(Ljava/lang/String;)V");
         env->CallVoidMethod(g_segmentCallback, methodId, segment);
+    }
+}
+
+void reportStop(JNIEnv *env) {
+    if (g_inferenceStoppedCallback != nullptr) {
+        jclass callbackClass = env->GetObjectClass(g_inferenceStoppedCallback);
+        __android_log_print(ANDROID_LOG_INFO, "Whisper", "created callback Class for stop inference");
+        jmethodID methodId = env->GetMethodID(callbackClass, "onInferenceStopped", "()V");
+        if (methodId != nullptr) {
+            env->CallVoidMethod(g_inferenceStoppedCallback, methodId);
+        }
     }
 }
 
@@ -131,6 +143,13 @@ Java_com_example_audio2text_WhisperLib_00024Companion_setTranscriptionProgressLi
     g_progressCallback = env->NewGlobalRef(listener);
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_example_audio2text_WhisperLib_00024Companion_setInferenceStoppedListener(JNIEnv *env, jobject thiz, jobject listener) {
+    // Conserver une référence globale à l'objet de rappel
+    __android_log_print(ANDROID_LOG_INFO, "Whisper", "setInferenceStoppedListener");
+    g_inferenceStoppedCallback = env->NewGlobalRef(listener);
+}
+
 void myProgressCallback(struct whisper_context * ctx, struct whisper_state * state, int progress, void * user_data) {
     auto *env = (JNIEnv *)user_data;
     __android_log_print(ANDROID_LOG_INFO, "whisper", "progress : %d", progress);
@@ -138,11 +157,20 @@ void myProgressCallback(struct whisper_context * ctx, struct whisper_state * sta
     reportProgress(env, progress);
 }
 
+void myAbortingCallback(struct whisper_context * ctx, struct whisper_state * state, void * user_data) {
+    __android_log_print(ANDROID_LOG_INFO, "whisper", "Call to abort callback");
+    // Report the progress to Kotlin (using the reportProgress function from previous steps)
+    __android_log_print(ANDROID_LOG_INFO, "Whisper", "Call to cancellation during inference");
+    auto *env = (JNIEnv *)user_data;
+    reportStop(env);
+}
+
 void mySegmentCallback(struct whisper_context * ctx, struct whisper_state * state, int n_new, void * user_data) {
     auto *env = (JNIEnv *)user_data;
     __android_log_print(ANDROID_LOG_INFO, "whisper", "progress : %d", n_new);
     // Get the last segment
     whisper_segment* segment = get_last_segment(state);
+
     jstring jsegment = env->NewStringUTF(segment->text.c_str());
     // Report the progress to Kotlin (using the reportProgress function from previous steps)
     reportSegment(env, jsegment);
@@ -268,11 +296,17 @@ Java_com_example_audio2text_WhisperLib_00024Companion_freeContext(
         env->DeleteGlobalRef(g_segmentCallback);
         g_segmentCallback = nullptr;
     }
+    if (g_inferenceStoppedCallback != nullptr) {
+        __android_log_print(ANDROID_LOG_INFO, "Whisper", "entered free g_inferenceStoppedCallback");
+        env->DeleteGlobalRef(g_inferenceStoppedCallback);
+        g_inferenceStoppedCallback = nullptr;
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_example_audio2text_WhisperLib_00024Companion_fullTranscribe(
-        JNIEnv *env, jobject thiz, jlong context_ptr, jfloatArray audio_data) {
+        JNIEnv *env, jobject thiz, jlong context_ptr, jfloatArray audio_data, jstring language_code, jstring language_to_ignore,
+        jboolean translate, jboolean speed, jstring initial_prompt, jint maxTextSize, jint offset_ms, jint duration_ms) {
     UNUSED(thiz);
     auto *context = (struct whisper_context *) context_ptr;
     jfloat *audio_data_arr = env->GetFloatArrayElements(audio_data, nullptr);
@@ -282,27 +316,45 @@ Java_com_example_audio2text_WhisperLib_00024Companion_fullTranscribe(
     int max_threads = max(1, min(8, get_nprocs() - 2));
     LOGI("Selecting %d threads", max_threads);
 
+    const char *languageCodeChar = env->GetStringUTFChars(language_code, nullptr);
+    const char *languageCodeToIgnoreChar = env->GetStringUTFChars(language_to_ignore, nullptr);
+    const char *initial_prompt_char = env->GetStringUTFChars(initial_prompt, nullptr);
+
     // The below adapted from the Objective-C iOS sample
     struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    if (translate == JNI_TRUE) {
+        __android_log_print(ANDROID_LOG_INFO, "Whisper", "translate is active");
+    } else {
+        __android_log_print(ANDROID_LOG_INFO, "Whisper", "translate is not active");
+    }
+
+    params.token_timestamps = true;
     params.print_realtime = false;
     params.print_progress = true;
     params.print_timestamps = false;
     params.print_special = false;
-    params.translate = false;
-    params.language = "auto";
+    params.language = languageCodeChar;
+    params.translate = translate;
+    params.speed_up = speed;
     params.n_threads = max_threads;
-    params.offset_ms = 0;
-    params.no_context = true;
+    params.no_context = false;
+    params.split_on_punctuation = true;
+    params.max_len = maxTextSize;
+    params.n_max_text_ctx = 3*maxTextSize;
     params.single_segment = false;
     params.progress_callback = myProgressCallback;
     params.progress_callback_user_data = env;
     params.new_segment_callback = mySegmentCallback;
     params.new_segment_callback_user_data = env;
-    params.greedy.best_of = 5;
-    params.temperature_inc = 0.1f;
+    params.inferenceStoppedCallback = myAbortingCallback;
+    params.inferenceStoppedCallback_user_data = env;
     params.beam_search.beam_size = 5;
-    params.entropy_thold = 2.8f;
-    params.n_max_text_ctx = 64;
+    params.greedy.best_of = 5;
+    params.temperature_inc = 0.2f;
+    params.ignore_lang_id = languageCodeToIgnoreChar;
+    params.initial_prompt = initial_prompt_char;
+    params.offset_ms = offset_ms;
+    params.duration_ms = duration_ms;
     //params.speed_up = true;
 
     whisper_reset_timings(context);
@@ -310,17 +362,13 @@ Java_com_example_audio2text_WhisperLib_00024Companion_fullTranscribe(
     LOGI("About to run whisper_full");
     LOGI("Audio data length: %zu", audio_data_length);
     int ret = whisper_full(context, params, audio_data_arr, audio_data_length);
+    __android_log_print(ANDROID_LOG_INFO, "Whisper", "whisper_full returned %d", ret);
     if (ret < 0) {
         LOGI("Failed to run the model");
-    } else if(ret == 1) {
-        __android_log_print(ANDROID_LOG_INFO, "Whisper", "Call to cancellation during inference");
-        // Obtenir la classe et appeler la méthode onInferenceStopped
-        jclass cls = env->GetObjectClass(thiz);
-        jmethodID mid = env->GetMethodID(cls, "onInferenceStopped", "()V");
-        if (mid != nullptr) {
-            env->CallVoidMethod(thiz, mid);
-        }
     } else {
+        if (ret == 2) {
+            __android_log_print(ANDROID_LOG_INFO, "Whisper", "Langue code: %s a été ignorée !", params.ignore_lang_id);
+        }
         LOGI("Successfully run the model");
         whisper_print_timings(context);
     }

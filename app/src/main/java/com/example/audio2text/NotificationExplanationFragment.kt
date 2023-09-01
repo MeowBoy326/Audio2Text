@@ -3,6 +3,7 @@ package com.example.audio2text
 import android.app.AlertDialog
 import android.app.NotificationManager
 import android.content.Context
+import android.content.DialogInterface
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
@@ -12,40 +13,45 @@ import android.view.ViewGroup
 import android.view.animation.AnimationUtils
 import android.widget.Button
 import android.widget.ImageView
-import android.widget.RelativeLayout
+import android.widget.TextView
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import com.google.android.material.floatingactionbutton.FloatingActionButton
+
 
 class NotificationExplanationFragment : Fragment() {
+    lateinit var button : Button
+    lateinit var nextArrow : FloatingActionButton
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View? {
-        return inflater.inflate(R.layout.fragment_notification_explanation, container, false)
+        val view = inflater.inflate(R.layout.fragment_notification_explanation, container, false)
+        button =  view.findViewById(R.id.enableNotificationsButton)
+
+        nextArrow = view.findViewById(R.id.nextArrow2)
+        return view
     }
 
     private fun checkNotifications() {
         val notificationManager = activity?.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val button = view?.findViewById<Button>(R.id.enableNotificationsButton)
-        val nextArrow = view?.findViewById<ImageView>(R.id.nextArrow)
 
         if (notificationManager.areNotificationsEnabled()) {
             // Charger l'animation de translation
             val animation = AnimationUtils.loadAnimation(requireContext(), R.anim.transition_animation)
-
-            button?.visibility = View.INVISIBLE
+            val textNotif = view?.findViewById<TextView>(R.id.text_notif)
+            textNotif?.text = "Notifications activées !"
+            button.visibility = View.INVISIBLE
 
             // Positionner la flèche au même endroit que le bouton, puis l'animer vers la droite
-            nextArrow?.visibility = View.VISIBLE
-            nextArrow?.startAnimation(animation)
+            nextArrow.visibility = View.VISIBLE
+            nextArrow.startAnimation(animation)
 
             // Définir un nouveau OnClickListener pour passer au fragment suivant
-            nextArrow?.setOnClickListener {
-                val nextFragment = ModelSelectionFragment()
-                parentFragmentManager.beginTransaction()
-                    .replace(R.id.container, nextFragment)
-                    .addToBackStack(null)
-                    .commit()
+            nextArrow.setOnClickListener {
+                // Appellez moveToPage() sur l'activité pour changer de page
+                (activity as? OnboardingPageChangeListener)?.moveToPage(3)
             }
         }
     }
@@ -57,7 +63,7 @@ class NotificationExplanationFragment : Fragment() {
         button.setOnClickListener {
             val notificationManager = activity?.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (!notificationManager.areNotificationsEnabled()) {
-                AlertDialog.Builder(activity)
+                val builder = AlertDialog.Builder(activity)
                     .setTitle("Les notifications sont désactivées")
                     .setMessage("Voulez-vous activer les notifications ?")
                     .setPositiveButton("Oui") { _, _ ->
@@ -70,7 +76,14 @@ class NotificationExplanationFragment : Fragment() {
                         startActivity(intent)
                     }
                     .setNegativeButton("Non", null)
-                    .show()
+                    //.show()
+
+                val alert = builder.create()
+                alert.show()
+                val nbutton: Button = alert.getButton(DialogInterface.BUTTON_NEGATIVE)
+                nbutton.setTextColor(ContextCompat.getColor(requireContext(),R.color.menu_text_color))
+                val pbutton: Button = alert.getButton(DialogInterface.BUTTON_POSITIVE)
+                pbutton.setTextColor(ContextCompat.getColor(requireContext(),R.color.menu_text_color))
             } else {
                 // Si les notifications sont activées, vérifiez leur état
                 checkNotifications()

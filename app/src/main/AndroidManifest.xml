@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:tools="http://schemas.android.com/tools"
+    xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -8,6 +9,7 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
 
     <application
         android:name=".MyApplication"
@@ -17,10 +19,14 @@
         android:largeHeap="true"
         android:roundIcon="@mipmap/logo_round"
         android:supportsRtl="true"
+        android:hardwareAccelerated="true"
+        android:enableOnBackInvokedCallback="true"
         android:networkSecurityConfig="@xml/network_security_config"
-        android:theme="@style/Theme.TemplateTFLiteCxx">
+        android:theme="@style/Theme.MyApp"
+        tools:targetApi="tiramisu">
         <activity
             android:name=".OnboardingActivity"
+            android:windowSoftInputMode="adjustPan"
             android:exported="false" />
         <!--
         <service android:name=".TranscriptionService"
@@ -38,9 +44,15 @@
             android:name=".TranscriptionContentProvider"
             android:authorities="com.example.audio2text"
             android:exported="false" />
-
+        <service
+            android:name=".DownloadService"
+            android:foregroundServiceType="dataSync" />
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync" />
         <activity
             android:name=".MainActivity"
+            android:windowSoftInputMode="adjustPan"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -48,8 +60,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".TutorialActivity"
-            android:exported="false" />
     </application>
 
 </manifest>

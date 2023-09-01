@@ -23,11 +23,11 @@ class WhisperContext private constructor(private var ptr: Long) {
 
     private val ACTION_UPDATE_PROGRESS = "com.example.action.UPDATE_PROGRESS"
 
-    suspend fun transcribeData(data: FloatArray): String = withContext(scope.coroutineContext) {
+    suspend fun transcribeData(data: FloatArray, languageCode: String, languageCodeToIgnore: String, translate: Boolean, speed: Boolean, initialPrompt: String, maxTextSize: Int, offsetMs: Int, durationMs: Int): String = withContext(scope.coroutineContext) {
         Log.d(LOG_TAG, "Transcription started for data segment") // Log when transcription starts
         require(ptr != 0L)
         val startTime = System.currentTimeMillis()
-        WhisperLib.fullTranscribe(ptr, data)
+        WhisperLib.fullTranscribe(ptr, data, languageCode, languageCodeToIgnore, translate, speed, initialPrompt, maxTextSize, offsetMs, durationMs)
         val endTime = System.currentTimeMillis()
         Log.d(TAG, "Temps d'exécution pour la méthode fullTranscribe : ${endTime - startTime} ms")
         val textCount = WhisperLib.getTextSegmentCount(ptr)
@@ -63,6 +63,11 @@ class WhisperContext private constructor(private var ptr: Long) {
         WhisperLib.setTranscriptionSegmentListener(callback)
     }
 
+    fun setInferenceStoppedCallback (callback: InferenceStoppedListener) {
+        Log.d("Whisper", "Call to set Inference Stopped Callback")
+        WhisperLib.setInferenceStoppedListener(callback)
+    }
+
     fun setTranscriptionSegmentListener(callback: TranscriptionSegmentListener) {
         Log.d("Whisper", "Call to set Transcription Callback")
         WhisperLib.setTranscriptionSegmentListener(callback)
@@ -87,7 +92,9 @@ class WhisperContext private constructor(private var ptr: Long) {
         fun sendProgressBroadcast(context: Context, progress: Int) {
             WhisperLib.sendProgressBroadcast(context, progress)
         }*/
+
         fun createContextFromFile(filePath: String): WhisperContext {
+            Log.d("Whisper", "Call to create context from file $filePath")
             val ptr = WhisperLib.initContext(filePath)
             if (ptr == 0L) {
                 throw java.lang.RuntimeException("Couldn't create context with path $filePath")
@@ -163,12 +170,13 @@ private class WhisperLib {
         // JNI methods
         external fun setStopped(contextPtr: Long)
         external fun setTranscriptionSegmentListener(callback: TranscriptionSegmentListener)
+        external fun setInferenceStoppedListener(callback: InferenceStoppedListener)
         external fun setTranscriptionProgressListener(callback: TranscriptionProgressListener)
         external fun initContextFromInputStream(inputStream: InputStream): Long
         external fun initContextFromAsset(assetManager: AssetManager, assetPath: String): Long
         external fun initContext(modelPath: String): Long
         external fun freeContext(contextPtr: Long)
-        external fun fullTranscribe(contextPtr: Long, audioData: FloatArray)
+        external fun fullTranscribe(contextPtr: Long, audioData: FloatArray, languageCode: String, languageToIgnore: String, translate: Boolean, speed: Boolean, initialPrompt: String, maxTextSize: Int, offsetMs: Int, durationMs: Int)
         external fun getTextSegmentCount(contextPtr: Long): Int
         external fun getTextSegment(contextPtr: Long, index: Int): String
         external fun getSystemInfo(): String

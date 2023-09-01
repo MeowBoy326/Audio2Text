@@ -132,8 +132,6 @@ WHISPER_API whisper_segment* get_last_segment(whisper_state* state);
 // Arrêter la transcription en cours
 WHISPER_API void set_is_stopped(whisper_context* ctx);
 
-typedef void (*InferenceStoppedCallback)(void* user_data);
-
 // Given a context, enable use of OpenVINO for encode inference.
 // model_path: Optional path to OpenVINO encoder IR model. If set to nullptr,
 //                      the path will be generated from the ggml model path that was passed
@@ -349,6 +347,9 @@ enum whisper_sampling_strategy {
 // Use the whisper_full_...() functions to obtain the text segments
 typedef void (*whisper_new_segment_callback)(struct whisper_context * ctx, struct whisper_state * state, int n_new, void * user_data);
 
+/*ADDED FOR ABORTING*/
+typedef void (*InferenceStoppedCallback)(struct whisper_context * ctx, struct whisper_state * state, void * user_data);
+
 // Progress callback
 typedef void (*whisper_progress_callback)(struct whisper_context * ctx, struct whisper_state * state, int progress, void * user_data);
 
@@ -393,6 +394,7 @@ struct whisper_full_params {
     float thold_ptsum;      // timestamp token sum probability threshold (~0.01)
     int   max_len;          // max segment length in characters
     bool  split_on_word;    // split on word rather than on token (when used with max_len)
+    bool  split_on_punctuation; // split on specific punctuation characters when used with max_len
     int   max_tokens;       // max tokens per segment (0 = no limit)
 
     // [EXPERIMENTAL] speed-up techniques
@@ -412,6 +414,7 @@ struct whisper_full_params {
     // for auto-detection, set to nullptr, "" or "auto"
     const char * language;
     bool detect_language;
+    const char * ignore_lang_id;
 
     // common decoding parameters:
     bool suppress_blank;    // ref: https://github.com/openai/whisper/blob/f82bc59f5ea234d4b97fb2860842ed38519f7e65/whisper/decoding.py#L89
@@ -453,6 +456,9 @@ struct whisper_full_params {
     // called by each decoder to filter obtained logits
     whisper_logits_filter_callback logits_filter_callback;
     void * logits_filter_callback_user_data;
+
+    InferenceStoppedCallback inferenceStoppedCallback;
+    void * inferenceStoppedCallback_user_data;
 };
 
 // NOTE: this function allocates memory, and it is the responsibility of the caller to free the pointer - see whisper_free_params()

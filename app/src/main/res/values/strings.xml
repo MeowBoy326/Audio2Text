@@ -11,4 +11,11 @@
     <string name="copy">Copier</string>
     <string name="navigation_drawer_open">Open navigation drawer</string>
     <string name="navigation_drawer_close">Close navigation drawer</string>
+    <string name="select_language">Merci de choisir une langue :</string>
+    <string name="select_language_ignored">Langue à ignorer :</string>
+    <string name="spellchecker_name">Audio2text SpellChecker</string>
+    <string name="subtype_generic">Langue</string>
+    <string name="notification_title_transcription">Transcription en cours</string>
+    <string name="notification_channel_id">transcription_channel</string>
+    <string name="cancel_processing">Stop</string>
 </resources>
