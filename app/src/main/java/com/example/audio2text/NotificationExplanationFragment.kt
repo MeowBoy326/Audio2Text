@@ -39,7 +39,7 @@ class NotificationExplanationFragment : Fragment() {
 
         if (notificationManager.areNotificationsEnabled()) {
             // Charger l'animation de translation
-            val animation = AnimationUtils.loadAnimation(requireContext(), R.anim.transition_animation)
+            val animation = AnimationUtils.loadAnimation(requireContext().applicationContext, R.anim.transition_animation)
             val textNotif = view?.findViewById<TextView>(R.id.text_notif)
             textNotif?.text = "Notifications activées !"
             button.visibility = View.INVISIBLE
@@ -81,9 +81,9 @@ class NotificationExplanationFragment : Fragment() {
                 val alert = builder.create()
                 alert.show()
                 val nbutton: Button = alert.getButton(DialogInterface.BUTTON_NEGATIVE)
-                nbutton.setTextColor(ContextCompat.getColor(requireContext(),R.color.menu_text_color))
+                nbutton.setTextColor(ContextCompat.getColor(requireContext().applicationContext,R.color.menu_text_color))
                 val pbutton: Button = alert.getButton(DialogInterface.BUTTON_POSITIVE)
-                pbutton.setTextColor(ContextCompat.getColor(requireContext(),R.color.menu_text_color))
+                pbutton.setTextColor(ContextCompat.getColor(requireContext().applicationContext,R.color.menu_text_color))
             } else {
                 // Si les notifications sont activées, vérifiez leur état
                 checkNotifications()

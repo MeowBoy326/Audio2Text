@@ -45,7 +45,7 @@ class PermissionExplanationFragment : Fragment() {
                 permisssionText?.text = "Permissions accordées !"
                 // Charger l'animation de translation
                 val animation =
-                    AnimationUtils.loadAnimation(requireContext(), R.anim.transition_animation)
+                    AnimationUtils.loadAnimation(requireContext().applicationContext, R.anim.transition_animation)
 
                 // Appliquer l'animation au bouton et le faire disparaître à la fin
                 button.visibility = View.INVISIBLE
@@ -61,7 +61,7 @@ class PermissionExplanationFragment : Fragment() {
                 }
             } else {
                 // Faire trembler le bouton ou toute autre action pour informer l'utilisateur
-                button.startAnimation(AnimationUtils.loadAnimation(requireContext(), R.anim.shake))
+                button.startAnimation(AnimationUtils.loadAnimation(requireContext().applicationContext, R.anim.shake))
             }
         }
 
@@ -70,7 +70,7 @@ class PermissionExplanationFragment : Fragment() {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (checkSelfPermission(
-                    requireContext(),
+                    requireContext().applicationContext,
                     Manifest.permission.READ_MEDIA_AUDIO
                 ) != PackageManager.PERMISSION_GRANTED
             ) {
@@ -78,7 +78,7 @@ class PermissionExplanationFragment : Fragment() {
             }
 
             if (checkSelfPermission(
-                    requireContext(),
+                    requireContext().applicationContext,
                     Manifest.permission.READ_MEDIA_VIDEO
                 ) != PackageManager.PERMISSION_GRANTED
             ) {
@@ -87,7 +87,7 @@ class PermissionExplanationFragment : Fragment() {
         }
         else {
             if (checkSelfPermission(
-                    requireContext(),
+                    requireContext().applicationContext,
                     Manifest.permission.READ_EXTERNAL_STORAGE
                 ) != PackageManager.PERMISSION_GRANTED
             ) {
@@ -107,7 +107,7 @@ class PermissionExplanationFragment : Fragment() {
             permisssionText?.text = "Permissions accordées !"
             // Charger l'animation de translation
             val animation =
-                AnimationUtils.loadAnimation(requireContext(), R.anim.transition_animation)
+                AnimationUtils.loadAnimation(requireContext().applicationContext, R.anim.transition_animation)
 
             // Appliquer l'animation au bouton et le faire disparaître à la fin
             button.visibility = View.INVISIBLE

@@ -1,7 +1,10 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
-    <item android:id="@+id/copy_action"
-        android:title="Copier"
-        android:enabled="false"
-        app:showAsAction="never"/>
+
+    <item
+        android:id="@+id/action_options"
+        android:icon="@drawable/launcher_icon"
+        android:orderInCategory="100"
+        android:title="Options"
+        app:showAsAction="always" />
 </menu>

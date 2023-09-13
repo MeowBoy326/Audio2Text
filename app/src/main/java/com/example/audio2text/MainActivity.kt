@@ -1,72 +1,62 @@
 package com.example.audio2text
 
+import android.app.Dialog
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.content.ContentUris
-import android.content.ContentValues.TAG
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
-import android.database.ContentObserver
+import android.content.SharedPreferences
 import android.graphics.Rect
 import android.net.Uri
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.provider.DocumentsContract
-import android.provider.MediaStore
+import android.text.method.KeyListener
 import android.util.Log
+import android.view.Gravity
+import android.view.LayoutInflater
 import android.view.Menu
+import android.view.MenuInflater
+import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.View
 import android.widget.EditText
-import android.widget.ProgressBar
+import android.widget.LinearLayout
+import android.widget.PopupWindow
 import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.viewModels
-import androidx.appcompat.app.ActionBarDrawerToggle
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
-import androidx.core.app.NotificationCompat
+import androidx.core.content.getSystemService
 import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
-import androidx.fragment.app.Fragment
-import androidx.fragment.app.FragmentManager
-import androidx.fragment.app.FragmentTransaction
-import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.Observer
-import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavController
-import androidx.navigation.Navigation.findNavController
 import androidx.navigation.findNavController
 import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.ui.AppBarConfiguration
 import androidx.navigation.ui.NavigationUI
 import androidx.navigation.ui.setupActionBarWithNavController
 import androidx.navigation.ui.setupWithNavController
-import androidx.work.OneTimeWorkRequest
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkInfo
-import androidx.work.WorkManager
-import androidx.work.workDataOf
-import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.navigation.NavigationView
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.File
-import java.io.FileOutputStream
 
 
 class MainActivity : AppCompatActivity() {
 
+    private lateinit var preferences: SharedPreferences
+    private lateinit var navController: NavController
+    private lateinit var navHostFragment: NavHostFragment
     private lateinit var drawerLayout: DrawerLayout
     private lateinit var navView: NavigationView
-    lateinit var homeViewModel: HomeViewModel
+    private lateinit var popupWindow: PopupWindow
+    private var editAction: TextView? = null
+    private var copyAction: TextView? = null
+    private var exportAction: TextView? = null
+    private var correctAction: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,18 +67,80 @@ class MainActivity : AppCompatActivity() {
         }*/
         setContentView(R.layout.activity_main)
 
-        val preferences = getSharedPreferences("MyPreferences", MODE_PRIVATE)
-        val lastPostion = preferences.getInt("LastPosition", 0)
-        Log.d("MainActivity", "Position in Adapter: $lastPostion")
-        if (lastPostion >= 0) {
+        preferences = getSharedPreferences("MyPreferences", MODE_PRIVATE)
+        val lastPosition = preferences.getInt("LastPosition", 0)
+
+        val intent = intent
+        val action = intent.action
+        val type = intent.type
+
+        Log.d("MainActivity", "Position in Adapter: $lastPosition")
+        if (lastPosition >= 0) {
             // Rediriger vers OnboardingActivity
-            val intent = Intent(this, OnboardingActivity::class.java)
-            startActivity(intent)
+            val intentToOnboard = Intent(this, OnboardingActivity::class.java)
+            startActivity(intentToOnboard)
             finish()
         } else {
-            val navHostFragment =
+
+            navHostFragment =
                 supportFragmentManager.findFragmentById(R.id.nav_host_fragment) as NavHostFragment
-            val navController = navHostFragment.navController
+            navController = navHostFragment.navController
+
+
+            val inflater: LayoutInflater =
+                getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
+            val popupView = inflater.inflate(R.layout.dialog_layout, LinearLayout(this), false)
+
+            val width = LinearLayout.LayoutParams.WRAP_CONTENT
+            val height = LinearLayout.LayoutParams.WRAP_CONTENT
+            popupWindow = PopupWindow(popupView, width, height, true)
+
+            copyAction = popupView.findViewById(R.id.copy_action)
+            editAction = popupView.findViewById(R.id.edit_action)
+            correctAction = popupView.findViewById(R.id.correct_action)
+            exportAction = popupView.findViewById(R.id.export_action)
+
+            // Ajoutez des OnClickListener pour chaque action
+            copyAction?.setOnClickListener {
+                // Naviguez vers le fragment des paramètres
+                val textToCopy = HomeViewModelHolder.viewModel.transcription.value ?: ""
+                Log.d("MainActivity", "textToCopy: $textToCopy")
+                val clipboard =
+                    getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = ClipData.newPlainText("Transcribed Text", textToCopy)
+                clipboard.setPrimaryClip(clip)
+                Toast.makeText(this, "Texte copié", Toast.LENGTH_SHORT).show()
+                popupWindow.dismiss()
+            }
+
+            editAction?.setOnClickListener {
+                // Votre logique pour "Editer"
+                if (HomeViewModelHolder.viewModel.isEditingTranscriptionText.value == true) {
+                    HomeViewModelHolder.viewModel.isEditingTranscriptionText.postValue(false)
+                    //item.title = "Vérouiller"
+                } else {
+                    HomeViewModelHolder.viewModel.isEditingTranscriptionText.postValue(true)
+                    //item.title = "Editer"
+                }
+                popupWindow.dismiss()
+            }
+
+            correctAction?.setOnClickListener {
+                // Votre logique pour "Corriger"
+                if (SpellCheckerSingleton.isSpellCheckerReady.value == true) {
+                    HomeViewModelHolder.viewModel.isSpellAlreadyRequested.postValue(true)
+                    HomeViewModelHolder.viewModel.isRequestSpellingSuggestions.postValue(true)
+                } else {
+                    Toast.makeText(this, "La correction n'est pas encore disponible. Merci de patienter...", Toast.LENGTH_SHORT).show()
+                }
+                popupWindow.dismiss()
+            }
+
+            exportAction?.setOnClickListener {
+                // Votre logique pour "Exporter"
+                exportTranscription()
+                popupWindow.dismiss()
+            }
 
             val toolbar: Toolbar = findViewById(R.id.toolbar)
             //toolbar.inflateMenu(R.menu.menu_toolbar)
@@ -97,26 +149,6 @@ class MainActivity : AppCompatActivity() {
             // Configurer le tiroir
             drawerLayout = findViewById(R.id.drawer_layout)
             navView = findViewById(R.id.nav_view)
-
-            homeViewModel = ViewModelProvider(this)[HomeViewModel::class.java]
-
-
-            toolbar.setOnMenuItemClickListener { item ->
-                when (item.itemId) {
-                    R.id.copy_action -> {
-                        // Naviguez vers le fragment des paramètres
-                        val textToCopy = homeViewModel.transcription.value ?: ""
-                        val clipboard =
-                            getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        val clip = ClipData.newPlainText("Transcribed Text", textToCopy)
-                        clipboard.setPrimaryClip(clip)
-                        Toast.makeText(this, "Texte copié", Toast.LENGTH_SHORT).show()
-                        true
-                    }
-
-                    else -> false
-                }
-            }
 
             // Configurer AppBarConfiguration
             val appBarConfiguration = AppBarConfiguration(
@@ -135,17 +167,144 @@ class MainActivity : AppCompatActivity() {
             // Configure le NavController avec la barre d'outils et AppBarConfiguration
             setupActionBarWithNavController(navController, appBarConfiguration)
 
-            homeViewModel.isTranscriptionTextEnabled.observe(this) { isEnabled ->
-                val item = toolbar.menu.findItem(R.id.copy_action)
-                item?.isEnabled = isEnabled
-                //invalidateOptionsMenu()
+            val isFullySuccessful = preferences.getBoolean("isFullySuccessful", false)
+            val isFullyStopped = preferences.getBoolean("isFullyStopped", false)
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (isFullySuccessful == true) {
+                preferences.edit()?.putBoolean("isFullySuccessful", false)?.apply()
+                preferences.edit()?.putBoolean("isInitialized", true)?.apply()
+                notificationManager.cancel(43)
+            } else if (isFullyStopped == true) {
+                preferences.edit()?.putBoolean("isFullyStopped", false)?.apply()
+                preferences.edit()?.putBoolean("isInitialized", true)?.apply()
+                notificationManager.cancel(43)
             }
+
+            navController.addOnDestinationChangedListener { _, destination, _ ->
+                when (destination.id) {
+                    R.id.homeFragment -> {
+                        // Afficher la barre d'outils et ses éléments
+                        invalidateOptionsMenu()  // Cela va déclencher onCreateOptionsMenu()
+                    }
+
+                    else -> {
+                        // Masquer ou modifier les éléments de la barre d'outils
+                        invalidateOptionsMenu()  // Cela va déclencher onCreateOptionsMenu()
+                    }
+                }
+            }
+
+            SpellCheckerSingleton.isSpellCheckerReady.observe(
+                this,
+                object : Observer<Boolean> {
+                    override fun onChanged(value: Boolean) {
+                        if (value == true) {
+                            Log.d("MainActivity", "SpellCheckerReady")
+                            HomeViewModelHolder.viewModel.pendingSegments.forEach { segment ->
+                                SpellCheckerSingleton.spellCheckerReadyListener?.onSpellCheckerReady(segment)
+                            }
+                            HomeViewModelHolder.viewModel.pendingSegments.clear()
+                            HomeViewModelHolder.viewModel.isNowReadyToCorrect.postValue(true)
+                        }
+                    }
+                })
+
+            HomeViewModelHolder.viewModel.isNowReadyToCorrect.observe(
+                this,
+                object : Observer<Boolean> {
+                    override fun onChanged(value: Boolean) {
+                        if (HomeViewModelHolder.viewModel.isEditableTranscriptionText.value == true && HomeViewModelHolder.viewModel.isEditableTranscriptionText.value == false) {
+                            correctAction?.isEnabled = value
+                        }
+                        //toolbar.menu.findItem(R.id.correct_action)?.isEnabled = value
+                        popupWindow.update()
+                    }
+                })
+
+            HomeViewModelHolder.viewModel.isEditableTranscriptionText.observe(
+                this,
+                object : Observer<Boolean> {
+                    override fun onChanged(value: Boolean) {
+                        editAction?.isEnabled = value
+                        copyAction?.isEnabled = value
+                        exportAction?.isEnabled = value
+                        HomeViewModelHolder.viewModel.isEditingTranscriptionText.postValue(value)
+                        popupWindow.update()
+                    }
+                })
+
+            HomeViewModelHolder.viewModel.isEditingTranscriptionText.observe(
+                this, object : Observer<Boolean> {
+                    override fun onChanged(value: Boolean) {
+                        val newTitle = if (value) "Verrouiller" else "Editer"
+                        editAction?.text = newTitle
+                        if (HomeViewModelHolder.viewModel.isEditableTranscriptionText.value == true) {
+                            correctAction?.isEnabled = !value
+                        }
+                    }
+                }
+            )
+        }
+
+        val uri = intent.data
+        Log.d("MainActivity", "uri: $uri")
+        if (lastPosition >= 0 && uri != null && uri.scheme == "content") {
+            if (Intent.ACTION_VIEW == action && type != null) {
+                if (type.startsWith("audio/") || type.startsWith("video/")) {
+                    val fileUri: Uri? = intent.data
+                    // Ajoutez l'URI à un Bundle ou à un ViewModel partagé
+                    val bundle = Bundle()
+                    bundle.putString("fileUri", fileUri.toString())
+                    navHostFragment.arguments = bundle
+                }
+            }
+        }
+
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.action_options -> {
+                showDialog()
+                true
+            }
+
+            else -> super.onOptionsItemSelected(item)
         }
     }
 
+    private fun showDialog() {
+        // Obtenez la vue ancrage pour positionner le PopupWindow
+        val anchor: View =
+            findViewById(R.id.action_options)  // l'ID de l'élément de menu dans la Toolbar
+
+        // Affichez le PopupWindow en bas de la vue ancrage
+        popupWindow.showAsDropDown(anchor, 0, 7, Gravity.END)
+    }
+
+    private fun exportTranscription() {
+        val shareIntent = Intent().apply {
+            action = Intent.ACTION_SEND
+            putExtra(
+                Intent.EXTRA_TEXT,
+                HomeViewModelHolder.viewModel.transcription.value?.substringAfter("\n\n")
+            )
+            type = "text/plain"
+        }
+        startActivity(Intent.createChooser(shareIntent, "Partager via"))
+    }
+
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(R.menu.menu_toolbar, menu)
+        val inflater: MenuInflater = menuInflater
+        when (navController.currentDestination?.id) {
+            R.id.homeFragment -> inflater.inflate(R.menu.menu_toolbar, menu)
+            else -> menu.clear()
+        }
         return true
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
     }
 
     override fun onSupportNavigateUp(): Boolean {

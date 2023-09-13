@@ -34,12 +34,6 @@
             android:foregroundServiceType="dataSync"
             android:process=":transcriptionProcess"/>
         -->
-        <receiver android:name=".StopTranscriptionReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="STOP_TRANSCRIPTION" />
-            </intent-filter>
-        </receiver>
         <provider
             android:name=".TranscriptionContentProvider"
             android:authorities="com.example.audio2text"
@@ -53,11 +47,33 @@
         <activity
             android:name=".MainActivity"
             android:windowSoftInputMode="adjustPan"
+            android:clearTaskOnLaunch="true"
+            android:launchMode="singleTop"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter android:label="transcribe_audio">
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:mimeType="audio/*" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\..*" />
+            </intent-filter>
+            <intent-filter android:label="transcribe_video">
+                <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:mimeType="video/*" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\..*" />
             </intent-filter>
         </activity>
     </application>

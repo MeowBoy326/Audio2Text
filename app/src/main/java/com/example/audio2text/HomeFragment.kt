@@ -2,53 +2,46 @@ package com.example.audio2text
 
 import android.annotation.SuppressLint
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.ContentValues
 import android.content.Context
-import android.content.Context.TEXT_SERVICES_MANAGER_SERVICE
+import android.content.Context.NOTIFICATION_SERVICE
 import android.content.Intent
 import android.content.SharedPreferences
-import android.database.ContentObserver
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.text.Editable
-import android.text.Layout
 import android.text.SpannableStringBuilder
 import android.text.Spanned
+import android.text.method.KeyListener
 import android.text.method.LinkMovementMethod
+import android.text.method.ScrollingMovementMethod
 import android.text.style.ClickableSpan
 import android.text.style.ForegroundColorSpan
 import android.util.Log
 import android.view.GestureDetector
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.view.textservice.SentenceSuggestionsInfo
-import android.view.textservice.SpellCheckerSession
-import android.view.textservice.SpellCheckerSubtype
-import android.view.textservice.SuggestionsInfo
-import android.view.textservice.TextInfo
-import android.view.textservice.TextServicesManager
 import android.widget.ArrayAdapter
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.ListPopupWindow
-import android.widget.PopupMenu
+import android.widget.ListView
+import android.widget.PopupWindow
 import android.widget.ScrollView
 import android.widget.TextView
-import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import androidx.core.content.ContextCompat.getSystemService
 import androidx.fragment.app.Fragment
-import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.Observer
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.viewModelScope
 import androidx.work.OneTimeWorkRequest
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
@@ -56,18 +49,28 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.google.android.material.floatingactionbutton.FloatingActionButton
+import io.gitlab.rxp90.jsymspell.TokenWithContext
+import io.gitlab.rxp90.jsymspell.api.SuggestItem
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.future.asDeferred
+import kotlinx.coroutines.future.await
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
 
 
 class HomeFragment : Fragment() {
+
+    //private lateinit var preferenceChangeListener: SharedPreferences.OnSharedPreferenceChangeListener
     private lateinit var selectAudioFileLauncher: ActivityResultLauncher<Intent>
-    private lateinit var transcriptionText: EditText
     private lateinit var header: TextView
     val CHANNEL_ID = "transcription_channel"
     private lateinit var stopTranscriptionButton: FloatingActionButton
@@ -79,20 +82,9 @@ class HomeFragment : Fragment() {
     private lateinit var notificationManager: NotificationManager
     private lateinit var tempFile: File
     private val NOT_A_LENGTH = -1
-    private var preferences: SharedPreferences? = null
-
-    private lateinit var viewModel: HomeViewModel
-
-    companion object {
-        lateinit var selectFileButton: FloatingActionButton
-    }
-
-    private val contentObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
-        override fun onChange(selfChange: Boolean) {
-            Log.d("Whisper", "onChange triggered")
-            viewModel.loadTranscription()
-        }
-    }
+    private lateinit var preferences: SharedPreferences
+    lateinit var selectFileButton: FloatingActionButton
+    lateinit var transcriptionText: EditText
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreateView(
@@ -105,148 +97,220 @@ class HomeFragment : Fragment() {
         stopTranscriptionButton = view.findViewById(R.id.stop_transcription_fab)
         selectFileButton = view.findViewById(R.id.select_file_fab)
 
-        preferences = requireContext().getSharedPreferences(
-            "MyPreferences",
-            Context.MODE_PRIVATE
-        )
-
         return view
     }
 
-    private val preferenceChangeListener =
-        SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            when (key) {
-                "isRunning" -> {
-                    val value = preferences?.getBoolean(key, false)!!
-                    viewModel.updateLiveData(key, value)
-                }
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
 
-                "isFullyStopped" -> {
-                    val value = preferences?.getBoolean(key, false)!!
-                    viewModel.updateLiveData(key, value)
-                }
+        preferences = requireContext().applicationContext.getSharedPreferences(
+            "MyPreferences",
+            Context.MODE_PRIVATE
+        )
+    }
 
-                "isFullySuccessful" -> {
-                    val value = preferences?.getBoolean(key, false)!!
-                    viewModel.updateLiveData(key, value)
-                }
-
-                "isGoingToStop" -> {
-                    val value = preferences?.getBoolean(key, false)!!
-                    viewModel.updateLiveData(key, value)
-                }
-            }
-        }
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // Initialisez le ViewModel
-        viewModel = ViewModelProvider(
-            requireActivity()
-        )[HomeViewModel::class.java]
+        transcriptionText.setOnTouchListener(object : View.OnTouchListener {
+            private val gestureDetector = GestureDetector(
+                requireContext(),
+                object : GestureDetector.SimpleOnGestureListener() {
+                    override fun onDoubleTap(e: MotionEvent): Boolean {
+                        if (HomeViewModelHolder.viewModel.isEditingTranscriptionText.value == false && HomeViewModelHolder.viewModel.isFullySuccessfulLiveData.value == true) {
+                            Log.d("HomeFragment", "onDoubleTap")
+                            HomeViewModelHolder.viewModel.isEditingTranscriptionText.postValue(true)
+                        }
+                        return super.onDoubleTap(e)
+                    }
+                })
 
-        viewModel.spellCheckerReady.observe(viewLifecycleOwner) { isReady ->
-            if (isReady) {
-                // Utilisez votre SpellChecker
-                if (viewModel.spellChecker != null) {
-                    checkSpelling(transcriptionText.text.toString())
+            override fun onTouch(v: View?, event: MotionEvent): Boolean {
+                gestureDetector.onTouchEvent(event)
+                return false
+            }
+        })
+
+        HomeViewModelHolder.viewModel.transcription.observe(
+            viewLifecycleOwner,
+            object : Observer<String?> {
+                override fun onChanged(value: String?) {
+                    Log.d("HomeFragment", "transcription: $value")
+                    if (value != null) {
+                        transcriptionText.setText(value)
+                    }
                 }
-            }
-        }
+            })
 
-        viewModel.viewModelScope.launch {
-            TranscriptionContentProvider._lastTranscription.collect { newValue ->
-                // Faire quelque chose avec newValue
-                transcriptionText.setText(newValue?.content)
-            }
-        }
+        HomeViewModelHolder.viewModel.isSelectFileButtonEnabled.observe(
+            viewLifecycleOwner,
+            object : Observer<Boolean> {
+                override fun onChanged(value: Boolean) {
+                    selectFileButton.isEnabled = value
+                }
+            })
 
-        // Utilisez les données du ViewModel pour restaurer l'état de vos éléments de vue
-        viewModel.transcription.observe(viewLifecycleOwner) { transcription ->
-            //transcriptionText.isVisible = true
-            transcriptionText.setText(transcription)
-        }
+        HomeViewModelHolder.viewModel.isTranscriptionTextVisible.observe(
+            viewLifecycleOwner,
+            object : Observer<Boolean> {
+                override fun onChanged(value: Boolean) {
+                    transcriptionText.visibility = if (value) View.VISIBLE else View.GONE
+                }
+            })
 
-        viewModel.isSelectFileButtonEnabled.observe(viewLifecycleOwner) { isEnabled ->
-            selectFileButton.isEnabled = isEnabled
-        }
+        HomeViewModelHolder.viewModel.isStopTranscriptionButtonVisible.observe(
+            viewLifecycleOwner,
+            object : Observer<Boolean> {
+                override fun onChanged(value: Boolean) {
+                    stopTranscriptionButton.visibility = if (value) View.VISIBLE else View.GONE
+                }
+            })
 
-        viewModel.isTranscriptionTextEnabled.observe(viewLifecycleOwner) { isEnabled ->
-            transcriptionText.isEnabled = isEnabled
-        }
+        HomeViewModelHolder.viewModel.isHeaderVisible.observe(
+            viewLifecycleOwner,
+            object : Observer<Boolean> {
+                override fun onChanged(value: Boolean) {
+                    header.visibility = if (value) View.VISIBLE else View.GONE
+                }
+            })
 
-        viewModel.isTranscriptionTextVisible.observe(viewLifecycleOwner) { isVisible ->
-            transcriptionText.visibility = if (isVisible) View.VISIBLE else View.GONE
-        }
+        HomeViewModelHolder.viewModel.isSelectFileButtonVisible.observe(
+            viewLifecycleOwner,
+            object : Observer<Boolean> {
+                override fun onChanged(value: Boolean) {
+                    selectFileButton.visibility = if (value == true) View.VISIBLE else View.GONE
+                }
+            })
 
-        viewModel.isStopTranscriptionButtonVisible.observe(viewLifecycleOwner) { isVisible ->
-            stopTranscriptionButton.visibility = if (isVisible) View.VISIBLE else View.GONE
-        }
+        HomeViewModelHolder.viewModel.isTranscriptionTextEnabled.observe(
+            viewLifecycleOwner,
+            object : Observer<Boolean> {
+                override fun onChanged(value: Boolean) {
+                    transcriptionText.isEnabled = value
+                }
+            })
 
-        viewModel.isHeaderVisible.observe(viewLifecycleOwner) { isVisible ->
-            header.visibility = if (isVisible) View.VISIBLE else View.GONE
-        }
+        HomeViewModelHolder.viewModel.isRunningLiveData.observe(
+            viewLifecycleOwner,
+            object : Observer<Boolean> {
+                override fun onChanged(value: Boolean) {
+                    Log.d("isRunning state:", value.toString())
+                    if (value) {
+                        HomeViewModelHolder.viewModel.isSelectFileButtonVisible.postValue(false)
+                        HomeViewModelHolder.viewModel.isStopTranscriptionButtonVisible.postValue(
+                            true
+                        )
+                        HomeViewModelHolder.viewModel.isHeaderVisible.postValue(false)
+                        HomeViewModelHolder.viewModel.isTranscriptionTextEnabled.postValue(false)
+                        HomeViewModelHolder.viewModel.isTranscriptionTextVisible.postValue(true)
+                        HomeViewModelHolder.viewModel.isEditableTranscriptionText.postValue(false)
+                    }
+                }
+            })
 
-        viewModel.isSelectFileButtonVisible.observe(viewLifecycleOwner) { isVisible ->
-            selectFileButton.visibility = if (isVisible) View.VISIBLE else View.GONE
-        }
+        HomeViewModelHolder.viewModel.isGoingToStopLiveData.observe(
+            viewLifecycleOwner,
+            object : Observer<Boolean> {
+                override fun onChanged(value: Boolean) {
+                    Log.d("HomeFragment", "isGoingToStop : $value")
+                    if (value) {
+                        HomeViewModelHolder.viewModel.isStopTranscriptionButtonVisible.postValue(
+                            false
+                        )
+                        HomeViewModelHolder.viewModel.isSelectFileButtonVisible.postValue(true)
+                        HomeViewModelHolder.viewModel.isSelectFileButtonEnabled.postValue(false)
+                        HomeViewModelHolder.viewModel.isTranscriptionTextEnabled.postValue(false)
+                        HomeViewModelHolder.viewModel.isTranscriptionTextVisible.postValue(true)
+                        HomeViewModelHolder.viewModel.isEditableTranscriptionText.postValue(false)
+                    }
+                }
+            })
 
-        requireActivity().contentResolver.registerContentObserver(
-            TranscriptionContentProvider.CONTENT_URI,
-            true,
-            contentObserver
-        )
+        HomeViewModelHolder.viewModel.isFullyStoppedLiveData.observe(
+            viewLifecycleOwner,
+            object : Observer<Boolean> {
+                override fun onChanged(value: Boolean) {
+                    Log.d("HomeFragment", "isFullyStopped : $value")
+                    if (value) {
+                        HomeViewModelHolder.viewModel.isHeaderVisible.postValue(true)
+                        HomeViewModelHolder.viewModel.isTranscriptionTextVisible.postValue(false)
+                        HomeViewModelHolder.viewModel.isTranscriptionTextEnabled.postValue(false)
+                        HomeViewModelHolder.viewModel.isStopTranscriptionButtonVisible.postValue(
+                            false
+                        )
+                        HomeViewModelHolder.viewModel.isSelectFileButtonVisible.postValue(true)
+                        HomeViewModelHolder.viewModel.isSelectFileButtonEnabled.postValue(true)
+                        HomeViewModelHolder.viewModel.isEditableTranscriptionText.postValue(false)
+                    }
+                }
+            })
 
-        // Écoutez les changements dans isRunningLiveData
-        viewModel.isRunningLiveData.observe(viewLifecycleOwner) { isRunning ->
-            Log.d("isRunning state:", isRunning.toString())
-            if (isRunning) {
-                viewModel.isSelectFileButtonVisible.postValue(false)
-                viewModel.isStopTranscriptionButtonVisible.postValue(true)
-                viewModel.isHeaderVisible.postValue(false)
-                viewModel.isTranscriptionTextEnabled.postValue(false)
-                viewModel.isTranscriptionTextVisible.postValue(true)
-            }
-            //app.resetValues("isRunning")
-            //app.resetValues(app.isRunningLiveData)
-        }
+        HomeViewModelHolder.viewModel.isFullySuccessfulLiveData.observe(
+            viewLifecycleOwner,
+            object : Observer<Boolean> {
+                override fun onChanged(value: Boolean) {
+                    if (value) {
+                        //HomeViewModelHolder.viewModel.isTranscriptionTextEnabled.postValue(true)
+                        HomeViewModelHolder.viewModel.isStopTranscriptionButtonVisible.postValue(
+                            false
+                        )
+                        HomeViewModelHolder.viewModel.isSelectFileButtonVisible.postValue(true)
+                        HomeViewModelHolder.viewModel.isEditableTranscriptionText.postValue(true)
+                        HomeViewModelHolder.viewModel.isTranscriptionTextEnabled.postValue(true)
+                        HomeViewModelHolder.viewModel.isTranscriptionTextVisible.postValue(true)
+                        HomeViewModelHolder.viewModel.isHeaderVisible.postValue(false)
+                    }
+                }
+            })
 
-        viewModel.isGoingToStopLiveData.observe(viewLifecycleOwner) { isGoingToStop ->
-            Log.d("HomeFragment", "isGoingToStop : $isGoingToStop")
-            if (isGoingToStop) {
-                Log.d("isGoingToStop", "ENTERED!!!!")
-                viewModel.isStopTranscriptionButtonVisible.postValue(false)
-                viewModel.isSelectFileButtonVisible.postValue(true)
-                viewModel.isSelectFileButtonEnabled.postValue(false)
-            }
-            //app.resetValues("isGoingToStop")
-            //app.resetValues(app.isGoingToStopLiveData)
-        }
+        HomeViewModelHolder.viewModel.isInitializedLiveData.observe(
+            viewLifecycleOwner,
+            object : Observer<Boolean> {
+                override fun onChanged(value: Boolean) {
+                    Log.d("HomeFragment", "isInitialized : $value")
+                    if (value) {
+                        HomeViewModelHolder.viewModel.isStopTranscriptionButtonVisible.postValue(
+                            false
+                        )
+                        HomeViewModelHolder.viewModel.isSelectFileButtonVisible.postValue(true)
+                        HomeViewModelHolder.viewModel.isSelectFileButtonEnabled.postValue(true)
+                        HomeViewModelHolder.viewModel.isEditableTranscriptionText.postValue(false)
+                        HomeViewModelHolder.viewModel.isTranscriptionTextEnabled.postValue(false)
+                        HomeViewModelHolder.viewModel.isTranscriptionTextVisible.postValue(false)
+                        HomeViewModelHolder.viewModel.isHeaderVisible.postValue(true)
+                    }
+                }
+            })
 
-        viewModel.isFullyStoppedLiveData.observe(viewLifecycleOwner) { isFullyStopped ->
-            Log.d("HomeFragment", "isFullyStopped : $isFullyStopped")
-            if (isFullyStopped) {
-                viewModel.isHeaderVisible.postValue(true)
-                viewModel.isTranscriptionTextVisible.postValue(false)
-                viewModel.isStopTranscriptionButtonVisible.postValue(false)
-                viewModel.isSelectFileButtonVisible.postValue(true)
-                viewModel.isSelectFileButtonEnabled.postValue(true)
-            }
-            //app.resetValues("isFullyStopped")
-            //app.resetValues(app.isFullyStoppedLiveData)
-        }
+        HomeViewModelHolder.viewModel.isEditingTranscriptionText.observe(
+            viewLifecycleOwner,
+            object : Observer<Boolean> {
+                override fun onChanged(value: Boolean) {
+                    if (HomeViewModelHolder.viewModel.isEditableTranscriptionText.value == true) {
+                        setEditTextState(transcriptionText, value)
+                        HomeViewModelHolder.viewModel.isRequestSpellingSuggestions.postValue(!value)
+                    }
+                }
+            })
 
-        viewModel.isFullySuccessfulLiveData.observe(viewLifecycleOwner) { isFullySuccessful ->
-            if (isFullySuccessful) {
-                viewModel.isTranscriptionTextEnabled.postValue(true)
-                viewModel.isStopTranscriptionButtonVisible.postValue(false)
-                viewModel.isSelectFileButtonVisible.postValue(true)
-            }
-            //app.resetValues("isFullySuccessful")
-            //app.resetValues(app.isFullySuccessfulLiveData)
-        }
+        HomeViewModelHolder.viewModel.isRequestSpellingSuggestions.observe(
+            viewLifecycleOwner,
+            object : Observer<Boolean> {
+                override fun onChanged(value: Boolean) {
+                    if (HomeViewModelHolder.viewModel.isEditableTranscriptionText.value == true) {
+                        if (value && HomeViewModelHolder.viewModel.isSpellAlreadyRequested.value == true) {
+                            applySpellingMarks()
+                        } else {
+                            removeSpellingMarks()
+                        }
+                    }
+                }
+            })
+
+        var totalOffset = "Résultat de la transcription :\n\n".length  // Pour le premier paragraphe
+        var previousParagraph = ""
 
         stopTranscriptionButton.setOnClickListener {
             stopTranscription()
@@ -309,11 +373,29 @@ class HomeFragment : Fragment() {
             selectAudioFileLauncher.launch(intent)
         }
 
-        // Enregistrez le listener pour SharedPreferences
-        preferences?.registerOnSharedPreferenceChangeListener(preferenceChangeListener)
-
         val workId = preferences?.getString("WorkRequestId", null)?.let {
             UUID.fromString(it)
+        }
+
+        // Récupérez l'URI depuis les arguments du Fragment
+        val selectedUri = arguments?.getString("fileUri")?.let { Uri.parse(it) }
+        Log.d("Uri", selectedUri.toString())
+        if (selectedUri != null && !HomeViewModelHolder.viewModel.isRunningLiveData.value!! && !HomeViewModelHolder.viewModel.isGoingToStopLiveData.value!!) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                val inputStream = requireActivity().contentResolver.openInputStream(selectedUri)
+                val tempFile = File.createTempFile("media", null, requireActivity().cacheDir)
+                inputStream?.use { input ->
+                    FileOutputStream(tempFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                val tempFilePath = tempFile.absolutePath
+                preferences?.edit()?.putString("tempFilePath", tempFilePath)?.apply()
+
+                withContext(Dispatchers.Main) {
+                    startTranscription(tempFilePath)
+                }
+            }
         }
 
         Log.d("WorkId", workId.toString())
@@ -321,6 +403,37 @@ class HomeFragment : Fragment() {
         if (workId != null) {
             observeWorkStatus(workId)
         }
+
+        transcriptionText.viewTreeObserver.addOnScrollChangedListener {
+            lastClickedInfo?.let { info ->
+                val (newX, newY) = calculateLineTop(info.start, transcriptionText)
+
+                // Update the position of the popup
+                currentListPopupWindow?.apply {
+                    horizontalOffset = newX
+                    verticalOffset = newY
+                    // Vous pourriez avoir besoin d'appeler `show()` pour forcer la mise à jour de la position.
+                    if (isShowing) {
+                        dismiss()
+                        show()
+                    }
+                }
+            }
+        }
+
+        requireActivity().onBackPressedDispatcher.addCallback(
+            viewLifecycleOwner,  // Le propriétaire du cycle de vie
+            object :
+                OnBackPressedCallback(true) { // `true` signifie que le callback est activé par défaut
+                override fun handleOnBackPressed() {
+                    if (HomeViewModelHolder.viewModel.isEditableTranscriptionText.value == true && HomeViewModelHolder.viewModel.isFullySuccessfulLiveData.value == true) {
+                        HomeViewModelHolder.viewModel.isEditingTranscriptionText.postValue(
+                            false
+                        )
+                    }
+                }
+            }
+        )
     }
 
     private fun startTranscription(inputFilePath: String) {
@@ -331,156 +444,181 @@ class HomeFragment : Fragment() {
 
         preferences?.edit()?.putString("WorkRequestId", workRequest.id.toString())?.apply()
 
-        WorkManager.getInstance(requireContext()).enqueue(workRequest)
+        WorkManager.getInstance(requireContext().applicationContext).enqueue(workRequest)
+
+        preferences.edit().putBoolean("isInitialized", false).apply()
+        preferences.edit().putBoolean("isFullyStopped", false).apply()
+        preferences.edit().putBoolean("isFullySuccessful", false).apply()
+        preferences.edit().putBoolean("isRunning", true).apply()
 
         observeWorkStatus(workRequest.id)
     }
 
-    private fun observeWorkStatus(workId: UUID) {
-        WorkManager.getInstance(requireContext()).getWorkInfoByIdLiveData(workId)
-            .observe(requireActivity()) { workInfo ->
-                Log.d("ENTERREEDDD:::", workInfo.toString())
-                if (workInfo != null && workInfo.state.isFinished) {
-                    // Update UI with progress here
-                    if (workInfo.state == WorkInfo.State.CANCELLED || workInfo.state == WorkInfo.State.FAILED) {
-                        // Handle cancellation here
-                        Log.d("Whisper", "Job was cancelled")
-                        val isStoppedBeforeInference =
-                            preferences?.getBoolean("stoppedBeforeInference", false)!!
-                        if (isStoppedBeforeInference) {
-                            preferences?.edit()?.putBoolean("isRunning", false)?.apply()
-                            preferences?.edit()?.putBoolean("isFullyStopped", true)?.apply()
-                        } else {
-                            preferences?.edit()?.putBoolean("isRunning", false)?.apply()
-                            preferences?.edit()?.putBoolean("isGoingToStop", true)?.apply()
-                        }
-
-                        //viewModel.isStopTranscriptionButtonVisible.value = false
-                        //viewModel.isSelectFileButtonVisible.value = true
-                        //viewModel.isSelectFileButtonEnabled.value = false
-                        lifecycleScope.launch(Dispatchers.Default) {
-                            Log.d("Whisper", "Call to release on purpose")
-                            TranscriptionWorker.releaseResources(requireContext(), true)
-                        }
-
-
-                        val notificationManager =
-                            requireContext().getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                        notificationManager.cancel(NOTIFICATION_ID)
-
-                        Toast.makeText(
-                            requireContext(),
-                            "La transcription a été arrêtée",
-                            Toast.LENGTH_SHORT
-                        ).show()
-
-                        preferences?.edit()?.putString("WorkRequestId", null)?.apply()
-                    }
-
-                    if (workInfo.state == WorkInfo.State.BLOCKED) {
-                        // Handle cancellation here
-                        Log.d("Whisper", "Job is blocked")
-                    }
-
-                    /*if (workInfo.state == WorkInfo.State.FAILED) {
-                        // Handle cancellation here
-                        Log.d("Whisper", "Job is failed")
-                        lifecycleScope.launch(Dispatchers.Default) {
-                            Log.d("Whisper", "Call to release on purpose")
-                            TranscriptionWorker.releaseResources(requireContext(), true)
-                        }
-
-                        Toast.makeText(
-                            requireContext(),
-                            "Arrêt de tous les services...",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }*/
-
-                    if (workInfo.state == WorkInfo.State.SUCCEEDED) {
-                        // Handle finished state
-                        Log.d(ContentValues.TAG, "Reach end of transcription")
-
-                        preferences?.edit()?.putBoolean("isRunning", false)?.apply()
-                        preferences?.edit()?.putBoolean("isFullySuccessful", true)?.apply()
-
-                        //viewModel.isTranscriptionTextEnabled.value = true
-                        //viewModel.isStopTranscriptionButtonVisible.value = false
-                        //viewModel.isSelectFileButtonVisible.value = true
-
-                        Log.d("END", "code reached at the end")
-                        val intent = Intent(requireContext(), MainActivity::class.java).apply {
-                            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-                        }
-                        val pendingIntent = PendingIntent.getActivity(
-                            requireContext(),
-                            0,
-                            intent,
-                            PendingIntent.FLAG_IMMUTABLE
-                        )
-
-                        // Logic to show "Transcription finished" notification
-                        val finishedNotification =
-                            NotificationCompat.Builder(requireContext(), CHANNEL_ID)
-                                .setContentTitle("Transcription terminée")
-                                .setSmallIcon(R.drawable.notification_icon)
-                                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                                .setContentIntent(pendingIntent) // Définissez l'intention pendante ici
-                                .setAutoCancel(true) // Ferme automatiquement la notification après le clic
-                                .build()
-
-                        notificationManager.notify(NOTIFICATION_ID, finishedNotification)
-                        preferences?.edit()?.putString("WorkRequestId", null)?.apply()
-                        viewModel.initSpellChecker(requireContext())
-                    }
-                }
-            }
+    private fun setEditTextState(editText: EditText, enabled: Boolean) {
+        editText.apply {
+            isFocusable = enabled
+            isFocusableInTouchMode = enabled
+            isEnabled = true  // Gardez cela toujours à 'true'
+            isCursorVisible = enabled
+            keyListener = if (enabled) EditText(this.context).keyListener else null
+            movementMethod = CustomLinkMovementMethod()
+        }
     }
 
-    fun checkSpelling(text: String) = lifecycleScope.launch {
-        val words = text.split(" ").filter { it.isNotEmpty() }
-        val ssb = SpannableStringBuilder(text)
-        var currentIndex = 0
-        val modifications = mutableListOf<() -> Unit>()
-
-        withContext(Dispatchers.Default) {
-            for (word in words) {
-                val start = currentIndex
-                val end = start + word.length
-                currentIndex = end + 1 // +1 pour l'espace
-
-                val suggestions = viewModel.spellChecker?.suggest(word, 3)
-                if (!suggestions.isNullOrEmpty() && suggestions[0] != word) {
-                    modifications.add {
-                        ssb.setSpan(
-                            ForegroundColorSpan(Color.RED),
-                            start,
-                            end,
-                            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-                        )
-                        ssb.setSpan(object : ClickableSpan() {
-                            override fun onClick(widget: View) {
-                                val layout = transcriptionText.layout
-                                val line = layout.getLineForOffset(start)
-                                val lineTop = layout.getLineTop(line)
-                                showSuggestionsMenu(
-                                    widget,
-                                    lineTop,
-                                    start,
-                                    end,
-                                    suggestions.toTypedArray()
-                                )
+    private fun observeWorkStatus(workId: UUID) {
+        WorkManager.getInstance(requireContext().applicationContext).getWorkInfoByIdLiveData(workId)
+            .observe(requireActivity(), object : Observer<WorkInfo> {
+                override fun onChanged(value: WorkInfo) {
+                    Log.d("ENTERREEDDD:::", value.toString())
+                    if (value.state.isFinished) {
+                        // Update UI with progress here
+                        if (value.state == WorkInfo.State.CANCELLED || value.state == WorkInfo.State.FAILED) {
+                            // Handle cancellation here
+                            Log.d("Whisper", "Job was cancelled")
+                            val isStoppedBeforeInference =
+                                preferences.getBoolean("stoppedBeforeInference", false)
+                            val isStoppedDuringInference = preferences.getBoolean(
+                                "stoppedDuringInference", false
+                            )
+                            if (isStoppedBeforeInference) {
+                                preferences.edit()?.putBoolean("isRunning", false)?.apply()
+                                preferences.edit()?.putBoolean("isFullyStopped", true)?.apply()
+                            } else if (isStoppedDuringInference) {
+                                CoroutineScope(Dispatchers.IO).launch {
+                                    TranscriptionWorker.releaseResources(true)
+                                }
                             }
-                        }, start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+
+                            notificationManager.cancel(NOTIFICATION_ID)
+
+                            preferences.edit()?.putString("WorkRequestId", null)?.apply()
+                        }
+
+                        if (value.state == WorkInfo.State.BLOCKED) {
+                            // Handle cancellation here
+                            Log.d("Whisper", "Job is blocked")
+                        }
+
+                        if (value.state == WorkInfo.State.SUCCEEDED) {
+                            // Handle finished state
+                            Log.d(ContentValues.TAG, "Reach end of transcription")
+
+                            CoroutineScope(Dispatchers.IO).launch {
+                                TranscriptionWorker.releaseResources()
+                            }
+
+                            preferences?.edit()?.putBoolean("isRunning", false)?.apply()
+                            preferences?.edit()?.putBoolean("isFullySuccessful", true)?.apply()
+
+                            //viewModel.isTranscriptionTextEnabled.value = true
+                            //viewModel.isStopTranscriptionButtonVisible.value = false
+                            //viewModel.isSelectFileButtonVisible.value = true
+
+                            preferences?.edit()?.putString("WorkRequestId", null)?.apply()
+                            //HomeViewModelHolder.viewModel.isEditableTranscriptionText.postValue(false)
+                        }
                     }
                 }
-            }
+            })
+    }
+
+    var spellingModifications: List<() -> Unit> = emptyList()
+    val lastIndices = HashMap<String, Int>()
+
+    fun calculateLineTop(start: Int, editText: EditText): Pair<Int, Int> {
+        val layout = editText.layout
+        val line = layout.getLineForOffset(start)
+        val baseline = layout.getLineBaseline(line)
+        val ascent = layout.getLineAscent(line)
+
+        val scrollY = editText.scrollY
+        val widgetHeight = editText.height
+
+        // Calculate y position considering visible window
+        val y = baseline + ascent - scrollY
+
+        // If calculated y is outside of the visible window, set it to the top or bottom of the widget
+        val visibleY = when {
+            y < 0 -> 0
+            y > widgetHeight -> widgetHeight
+            else -> y
         }
 
-        withContext(Dispatchers.Main) {
-            modifications.forEach { it() }
+        val x = layout.getPrimaryHorizontal(start)
+            .toInt() + editText.scrollX // take into account the scrolled position
+        return Pair(x, visibleY)
+    }
+
+    private var currentListPopupWindow: ListPopupWindow? = null
+    private var lastClickedInfo: MisspelledWordInfo? = null
+
+    fun applySpellingMarks() {
+        val ssb = SpannableStringBuilder(transcriptionText.text)
+
+        for (info in HomeViewModelHolder.viewModel.misspelledWords) {
+            val clickableSpan = object : ClickableSpan() {
+                override fun onClick(widget: View) {
+                    val (x, y) = calculateLineTop(info.start, transcriptionText)
+                    showSuggestionsMenu(
+                        widget,
+                        Pair(x, y),
+                        info.start,
+                        info.end,
+                        info.suggestions.toTypedArray()
+                    )
+                    lastClickedInfo = info  // Sauvegarder la dernière information sur le mot cliqué
+                }
+            }
+
+            ssb.setSpan(
+                clickableSpan,
+                info.start,
+                info.end,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+
+            ssb.setSpan(
+                ForegroundColorSpan(
+                    ContextCompat.getColor(
+                        requireContext().applicationContext,
+                        R.color.colorTypo
+                    )
+                ),
+                info.start,
+                info.end,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+
+        // Utilisation du thread principal de l'UI pour les modifications de l'UI
+        activity?.runOnUiThread {
             transcriptionText.text = ssb
-            transcriptionText.movementMethod = LinkMovementMethod.getInstance()
+            transcriptionText.movementMethod = CustomLinkMovementMethod()
+        }
+    }
+
+    fun removeSpellingMarks() {
+        val ssb = SpannableStringBuilder(transcriptionText.text)
+
+        // Étape 1: Supprimer les spans
+        val clickableSpans = ssb.getSpans(0, ssb.length, ClickableSpan::class.java)
+        val colorSpans = ssb.getSpans(0, ssb.length, ForegroundColorSpan::class.java)
+
+        for (span in clickableSpans) {
+            ssb.removeSpan(span)
+        }
+
+        for (span in colorSpans) {
+            ssb.removeSpan(span)
+        }
+
+        // Étape 2: Réinitialiser le texte
+        activity?.runOnUiThread {
+            transcriptionText.text = ssb
+
+            // Étape 3: Réinitialiser la méthode de mouvement
+            transcriptionText.movementMethod =
+                CustomLinkMovementMethod()  // ou une autre méthode de mouvement par défaut
         }
     }
 
@@ -488,14 +626,23 @@ class HomeFragment : Fragment() {
         // Annuler le travail de transcription
         Log.d("Whisper", "Annuler le travail de transcription")
 
-        val workId = preferences?.getString("WorkRequestId", null)
+        val showText =
+            "Arrêt en cours. Veuillez patienter..."
+        Log.d("Whisper", "Call to stop during inference")
+        HomeViewModelHolder.viewModel.saveTemporaryTranscription(showText)
+        preferences.edit()?.putBoolean("isRunning", false)?.apply()
+        preferences.edit()?.putBoolean("isGoingToStop", true)?.apply()
+        preferences.edit().putBoolean("stoppedDuringInference", true).apply()
+
+        val workId = preferences.getString("WorkRequestId", null)
         if (workId != null) {
             val workRequestId = UUID.fromString(workId)
 
-            WorkManager.getInstance(requireContext()).cancelWorkById(workRequestId)
+            WorkManager.getInstance(requireContext().applicationContext)
+                .cancelWorkById(workRequestId)
         }
 
-        val tempFilePath = preferences?.getString("tempFilePath", "")
+        val tempFilePath = preferences.getString("tempFilePath", "")
         val tempFile = tempFilePath?.let { File(it) }
         if (tempFile?.exists() == true) {
             tempFile.delete()
@@ -507,49 +654,61 @@ class HomeFragment : Fragment() {
             null,
             null
         )
-        viewModel.transcription.value = ""
+        HomeViewModelHolder.viewModel.transcription.value = ""
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-
-        Log.d("Whisper", "Appel on Destroy Main")
-        requireActivity().contentResolver.unregisterContentObserver(contentObserver)
-
-        preferences?.unregisterOnSharedPreferenceChangeListener(preferenceChangeListener)
-    }
-
-    private fun replaceWord(start: Int, end: Int, replacement: String) {
-        val editable: Editable = transcriptionText.editableText
-        editable.replace(start, end, replacement)
+    private fun replaceWord(start: Int, end: Int, newWord: String) {
+        val ssb = SpannableStringBuilder(transcriptionText.text)
+        ssb.replace(start, end, newWord)
+        transcriptionText.text = ssb
     }
 
     private fun showSuggestionsMenu(
         view: View,
-        lineTop: Int,
+        position: Pair<Int, Int>,
         start: Int,
         end: Int,
         suggestions: Array<String>
     ) {
-        val listPopupWindow = ListPopupWindow(requireContext())
+        // Fermeture de la popup existante
+        currentListPopupWindow?.dismiss()
+
+        val (x, y) = position
+        val listPopupWindow = ListPopupWindow(view.context)
         listPopupWindow.anchorView = view
-        listPopupWindow.width = 600
+        listPopupWindow.width = 500
         listPopupWindow.height = WindowManager.LayoutParams.WRAP_CONTENT
-        listPopupWindow.verticalOffset =
-            lineTop // Utilisation de lineTop pour le positionnement vertical
+        listPopupWindow.horizontalOffset = x
+        listPopupWindow.verticalOffset = y
+
         listPopupWindow.setAdapter(
             ArrayAdapter(
-                requireContext(),
+                view.context,
                 android.R.layout.simple_list_item_1,
                 suggestions
             )
         )
 
-        listPopupWindow.setOnItemClickListener { _, _, position, _ ->
-            replaceWord(start, end, suggestions[position])
+        listPopupWindow.setOnItemClickListener { _, _, newPosition, _ ->
+            removeStylingFromWord(start, end)
+            replaceWord(start, end, suggestions[newPosition])
             listPopupWindow.dismiss()
         }
 
         listPopupWindow.show()
+
+        // Sauvegarde de la référence à la ListPopupWindow actuelle
+        currentListPopupWindow = listPopupWindow
+    }
+
+    private fun removeStylingFromWord(start: Int, end: Int) {
+        val ssb = SpannableStringBuilder(transcriptionText.text)
+        val toRemove = ssb.getSpans(start, end, Object::class.java)
+
+        for (span in toRemove) {
+            ssb.removeSpan(span)
+        }
+
+        transcriptionText.text = ssb
     }
 }

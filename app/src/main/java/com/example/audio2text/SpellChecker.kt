@@ -2,65 +2,145 @@ package com.example.audio2text
 
 import android.content.Context
 import android.util.Log
+import io.gitlab.rxp90.jsymspell.SymSpell
+import io.gitlab.rxp90.jsymspell.SymSpellBuilder
+import io.gitlab.rxp90.jsymspell.SymSpellImpl
+import io.gitlab.rxp90.jsymspell.TokenWithContext
+import io.gitlab.rxp90.jsymspell.Verbosity
+import io.gitlab.rxp90.jsymspell.api.Bigram
+import io.gitlab.rxp90.jsymspell.api.SuggestItem
+import io.gitlab.rxp90.jsymspell.exceptions.NotInitializedException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileInputStream
-import java.io.FileReader
 import java.io.InputStreamReader
+import java.util.Collections
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
 
-class SpellChecker private constructor(distanceFunc: (String, String) -> Int) {
+class SpellChecker private constructor() {
 
     companion object Builder {
-        private var distanceFunc: (String, String) -> Int = ::LevenshteinDistance
-        private val frequencyMap: HashMap<String, Int> = HashMap()
+        private var maxEditDistance: Int = 2  // valeur par défaut
+        val frequencyMap: HashMap<String, Long> = HashMap()
+        val bigramMap: HashMap<Bigram, Long> = HashMap()
+        private lateinit var symSpell: CompletableFuture<SymSpellImpl>
 
-        fun loadFrequencyDictionary(context: Context, filename: String): Builder {
-            val absoluteFilePath = File(context.filesDir, filename).absolutePath
-            val inputStream = FileInputStream(absoluteFilePath)
-            val bufferedReader = BufferedReader(InputStreamReader(inputStream))
-            Log.d("TAG", "loadFrequencyDictionary: $absoluteFilePath")
+        suspend fun loadBigramDictionary(context: Context, filename: String): Builder {
+            withContext(Dispatchers.IO) {
+                val absoluteFilePath = File(context.filesDir, filename).absolutePath
+                val inputStream = FileInputStream(absoluteFilePath)
+                val bufferedReader = BufferedReader(InputStreamReader(inputStream))
 
-            bufferedReader.forEachLine { line ->
-                val parts = line.split("\t")
-                if (parts.size >= 2) {
-                    val word = parts[1]
-                    val frequency = parts[2].toIntOrNull() ?: 0
-                    frequencyMap[word] = frequency
+                bufferedReader.forEachLine { line ->
+                    val parts = line.split(" ")
+                    if (parts.size >= 3) {
+                        val word1 = parts[0]
+                        val word2 = parts[1]
+                        val frequency = parts[2].toLongOrNull() ?: 0L
+                        val bigram = Bigram(word1, word2)
+                        bigramMap[bigram] = frequency
+                    }
+                }
+
+                bufferedReader.close()
+            }
+
+            return this
+        }
+
+        suspend fun loadFrequencyDictionary(context: Context, filename: String): Builder {
+            withContext(Dispatchers.IO) {
+                val absoluteFilePath = File(context.filesDir, filename).absolutePath
+                val inputStream = FileInputStream(absoluteFilePath)
+                val bufferedReader = BufferedReader(InputStreamReader(inputStream))
+                bufferedReader.forEachLine { line ->
+                    //Log.d("loadFrequencyDictionary", "Ligne : $line")
+                    val parts = line.split("\t")
+                    if (parts.size >= 3) { // Changé à 3 au lieu de 2
+                        val word = parts[1]  // Changé à 1 au lieu de 0
+                        val frequency = parts[2].toLongOrNull() ?: 0L  // Changé à 2 au lieu de 1
+                        frequencyMap.put(word, frequency)
+                        //Log.d("loadFrequencyDictionary", "Mot : $word, Fréquence : $frequency")
+                    } else {
+                        Log.e("loadFrequencyDictionary", "Ligne mal formée : $line")
+                    }
+                }
+
+                bufferedReader.close()
+            }
+
+            return this
+        }
+
+        fun withMaxEditDistance(maxEditDistance: Int): Builder {
+            this.maxEditDistance = maxEditDistance
+            return this
+        }
+
+        fun buildAsync(): CompletableFuture<SpellChecker> {
+            return CompletableFuture.supplyAsync {
+                if (frequencyMap.isEmpty()) {
+                    throw Exception("La carte de fréquence est vide")
+                }
+
+                if (bigramMap.isEmpty()) {
+                    throw Exception("La carte des bigrammes est vide")
+                }
+
+                Log.d("SpellChecker", "frequencyMap: ${frequencyMap.size}")
+                Log.d("SpellChecker", "bigramMap: ${bigramMap.size}")
+
+                // Mettre à jour SymSpell ici
+                symSpell = SymSpellBuilder()
+                    .setUnigramLexicon(frequencyMap)
+                    .setBigramLexicon(bigramMap)
+                    .setMaxDictionaryEditDistance(maxEditDistance)
+                    .createSymSpell()
+
+                SpellChecker()
+            }
+        }
+    }
+
+    fun suggest(
+        misspelledPhrase: String,
+        maxEditDistance: Int = SpellChecker.maxEditDistance
+    ): CompletableFuture<List<TokenWithContext>> {
+        return symSpell.thenApplyAsync { completedSymSpell ->
+            val suggestions = completedSymSpell.lookupCompound(misspelledPhrase, maxEditDistance, false, Verbosity.BEST_WITHIN_MAX_EDIT_DISTANCE, 3)
+            Log.d("SpellChecker", "suggestions size: ${suggestions.size}")
+            Log.d("SpellChecker", "misspelledPhrase: $misspelledPhrase")
+            val allSuggestions = suggestions.flatMap { tokenWithContext ->
+                tokenWithContext.suggestions.map { suggestItem ->
+                    suggestItem.suggestion // ou suggestItem.toString() si vous voulez toute l'information
                 }
             }
-            return this
+            Log.d("SpellChecker", "longest suggestion: ${allSuggestions.maxByOrNull { it.length }}")
+            suggestions
         }
+    }
 
-        fun withEditDistanceFunction(func: (str1: String, str2: String) -> Int): Builder {
-            distanceFunc = func
-            return this
-        }
-
-        fun build(): SpellChecker {
-            if (frequencyMap.isEmpty()) {
-                throw Exception("please specify frequency map")
+        fun suggestWord(
+            misspelledWord: String,
+            verbosity: Verbosity = Verbosity.CLOSEST,
+            includeUnknown: Boolean = false
+        ): CompletableFuture<List<String>> {
+            return symSpell.thenApplyAsync { completedSymSpell ->
+                try {
+                    val suggestions =
+                        completedSymSpell.lookup(misspelledWord, verbosity, includeUnknown)
+                    Log.d("SpellChecker", "suggestions: ${suggestions.size}")
+                    Log.d("SpellChecker", "misspelledWord: $misspelledWord")
+                    suggestions.map { it.suggestion }
+                } catch (e: NotInitializedException) {
+                    Log.e("SpellChecker", "SymSpell not initialized")
+                    emptyList<String>()
+                }
             }
-            return SpellChecker(distanceFunc)
         }
-
-    }
-
-    private val bkTree: BKTree
-
-    init {
-        bkTree = BKTree(distanceFunc)
-        for (word in frequencyMap.keys) {
-            bkTree.add(word)
-        }
-    }
-
-    val totalWords: Int get() = frequencyMap.size
-
-    fun suggest(misspellWord: String, tolerance: Int = 1): List<String> {
-        val suggestions = bkTree.getSpellSuggestion(misspellWord, tolerance)
-        return suggestions.sortedBy { word ->
-            -frequencyMap.getOrDefault(word, 0)
-        }
-    }
-
 }

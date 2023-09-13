@@ -20,15 +20,14 @@
             android:layout_gravity="center_vertical"
             android:text="Nom du dictionnaire"/>
 
-        <ProgressBar
+        <com.google.android.material.progressindicator.LinearProgressIndicator
             android:id="@+id/progressBarDictionary"
-            style="?android:attr/progressBarStyleHorizontal"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="0.6"
             android:layout_gravity="center_vertical"
-            android:indeterminate="false"
             android:padding="16dp"
+            app:indeterminateAnimationType="disjoint"
             android:progressBackgroundTintMode="src_atop"/>
 
         <ImageButton
@@ -40,7 +39,7 @@
             android:layout_weight="0.1"
             android:layout_gravity="center_vertical"
             android:backgroundTint="@android:color/transparent"
-            app:tint="@color/colorAccent" />
+            app:tint="@color/color_download_button" />
 
         <ImageButton
             android:id="@+id/delete_button"

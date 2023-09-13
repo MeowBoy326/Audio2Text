@@ -24,7 +24,7 @@ class WelcomeFragment : Fragment() {
 
         // Animation pour faire tomber le logo
         val logoImageView: ImageView = view.findViewById(R.id.logoImageView)
-        val color = ContextCompat.getColor(requireContext(), R.color.imageViewColor)
+        val color = ContextCompat.getColor(requireContext().applicationContext, R.color.imageViewColor)
         logoImageView.setColorFilter(color)
         val animation = ObjectAnimator.ofFloat(logoImageView, "translationY", -1000f, 0f)
         animation.duration = 500 // Durée de l'animation en millisecondes

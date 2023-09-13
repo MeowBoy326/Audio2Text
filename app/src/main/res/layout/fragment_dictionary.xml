@@ -36,7 +36,6 @@
             android:layout_centerHorizontal="true"
             android:layout_alignParentBottom="true"
             android:layout_margin="16dp"
-            android:enabled="false"
             android:text="Confirmer" />
 
     </RelativeLayout>

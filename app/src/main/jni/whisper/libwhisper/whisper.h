@@ -129,6 +129,10 @@ WHISPER_API struct whisper_state * whisper_init_state(struct whisper_context * c
 // Prototypes de fonctions pour accéder aux membres de whisper_state
 WHISPER_API whisper_segment* get_last_segment(whisper_state* state);
 
+WHISPER_API int get_seek_delta(whisper_context* ctx);
+
+WHISPER_API int get_result_len(whisper_context* ctx);
+
 // Arrêter la transcription en cours
 WHISPER_API void set_is_stopped(whisper_context* ctx);
 

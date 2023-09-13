@@ -23,4 +23,5 @@
     <color name="colorDisabled">#FFFFFFFF</color>
     <color name="colorEnabled">#b7c9e2</color>
     <color name="colorBackgroundDico">#f5e8de</color>
+    <color name="colorTypo">#7a0012</color>
 </resources>

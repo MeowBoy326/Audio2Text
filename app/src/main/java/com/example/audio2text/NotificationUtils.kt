@@ -36,20 +36,19 @@ fun createNotification(
     workRequestId: UUID,
     notificationTitle: String,
     showProgress: Boolean = false,
-    progress: Int = 0,
-    stopTranscriptionPendingIntent: PendingIntent? = null
+    progress: Int = 0
 ): Notification {
-    val channelId = context.getString(R.string.notification_channel_id)
+    val channelId = MyApplication.CHANNEL_ID
     val cancelText = context.getString(R.string.cancel_processing)
     val name = context.getString(R.string.channel_name)
-    //val cancelIntent = WorkManager.getInstance(context).createCancelPendingIntent(workRequestId)
+    val cancelIntent = WorkManager.getInstance(context).createCancelPendingIntent(workRequestId)
 
     val builder = NotificationCompat.Builder(context, channelId)
         .setContentTitle(notificationTitle)
         .setTicker(notificationTitle)
         .setSmallIcon(R.drawable.notification_icon)
         .setOngoing(true)
-        .addAction(android.R.drawable.ic_delete, cancelText, stopTranscriptionPendingIntent)
+        .addAction(android.R.drawable.ic_delete, cancelText, cancelIntent)
 
     if (showProgress) {
         builder.setProgress(100, progress, false)
@@ -61,7 +60,6 @@ fun createNotification(
 /**
  * Create the required notification channel for O+ devices.
  */
-@TargetApi(Build.VERSION_CODES.O)
 fun createNotificationChannel(
     context: Context,
     channelId: String,

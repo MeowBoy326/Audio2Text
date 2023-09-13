@@ -2,20 +2,24 @@ package com.example.audio2text
 
 import android.app.Application
 import android.content.Context
-import android.content.SharedPreferences
-import android.text.SpannableString
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.asFlow
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
+import java.util.LinkedList
+import java.util.concurrent.CopyOnWriteArrayList
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
+    val isInitializedLiveData = MutableLiveData<Boolean>()
+    val isNowReadyToCorrect = MutableLiveData<Boolean>()
+
     // Stockez l'état de vos éléments de vue ici, par exemple:
-    val transcription = MutableLiveData<String?>()
+    val transcription = MutableLiveData<String>()
     val isTranscriptionTextEnabled = MutableLiveData<Boolean>()
     val isStopTranscriptionButtonVisible = MutableLiveData<Boolean>()
     val isSelectFileButtonVisible = MutableLiveData<Boolean>()
@@ -26,19 +30,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val isFullyStoppedLiveData = MutableLiveData<Boolean>()
     val isFullySuccessfulLiveData = MutableLiveData<Boolean>()
     val isGoingToStopLiveData = MutableLiveData<Boolean>()
-    var spellChecker: SpellChecker? = null
-    val spellCheckerReady = MutableLiveData<Boolean>()
-    val cursor = try {
-        application.applicationContext.contentResolver.query(
-            TranscriptionContentProvider.CONTENT_URI,
-            null,
-            null,
-            null,
-            null
-        )
-    } catch (e: Exception) {
-        null
-    }
+    val newSegment = MutableLiveData<String>()
+    val pendingSegments = LinkedList<String>()
+    val isRequestSpellingSuggestions = MutableLiveData<Boolean>()
+    val isEditableTranscriptionText = MutableLiveData<Boolean>()
+    val isEditingTranscriptionText = MutableLiveData<Boolean>()
+    val misspelledWords = CopyOnWriteArrayList<MisspelledWordInfo>()
+    val isSpellAlreadyRequested = MutableLiveData<Boolean>()
 
     //val isRunning = MutableLiveData<Boolean>()
     //private val contentResolver = application.contentResolver
@@ -49,6 +47,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             "isFullyStopped" -> isFullyStoppedLiveData.postValue(value)
             "isFullySuccessful" -> isFullySuccessfulLiveData.postValue(value)
             "isGoingToStop" -> isGoingToStopLiveData.postValue(value)
+            "isInitialized" -> isInitializedLiveData.postValue(value)
         }
     }
 
@@ -60,10 +59,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val isGoingToStop = preferences.getBoolean("isGoingToStop", false)
         val isFullyStopped = preferences.getBoolean("isFullyStopped", false)
         val isFullySuccessful = preferences.getBoolean("isFullySuccessful", false)
+        val isInitialized = preferences.getBoolean("isInitialized", false)
         Log.d("SharePreferences", "isRunning: $isRunning")
         Log.d("SharePreferences", "isGoingToStop: $isGoingToStop")
         Log.d("SharePreferences", "isFullyStopped: $isFullyStopped")
         Log.d("SharePreferences", "isFullySuccessful: $isFullySuccessful")
+        Log.d("SharePreferences", "isInitialized: $isInitialized")
         if (isRunning) {
             isRunningLiveData.postValue(true)
         } else if (isGoingToStop) {
@@ -72,37 +73,52 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             isFullyStoppedLiveData.postValue(true)
         } else if (isFullySuccessful) {
             isFullySuccessfulLiveData.postValue(true)
+        } else if (isInitialized) {
+            isInitializedLiveData.postValue(true)
         }
+
         loadTranscription()
     }
 
-    fun initSpellChecker(context: Context) {
-        CoroutineScope(Dispatchers.IO).launch {
-            if (spellChecker == null) {
-                val preferences =
-                    context.getSharedPreferences("MyPreferences", Context.MODE_PRIVATE)
-                val selectedDictionaryId = preferences.getString("selectedDictionaryId", "")
-                if (selectedDictionaryId != null) {
-                    val path =
-                        DictionaryManager.getDictionaryItemById(selectedDictionaryId)?.fileRelativePath
-                    spellChecker = SpellChecker.loadFrequencyDictionary(
-                        context,
-                        path!!
-                    ).withEditDistanceFunction(::DamerauLevenshtein).build()
-                }
-            }
-            spellCheckerReady.postValue(true)
-        }
+    fun saveTemporaryTranscription(transcriptionText: String?) {
+        TranscriptionContentProvider().updateTemporaryText(transcriptionText)
     }
 
     fun loadTranscription() {
-        if (cursor != null && cursor.moveToFirst()) {
-            cursor.use { cursorUsed ->
-                val columnIndex = cursorUsed.getColumnIndex("transcription")
-                val transcriptionText = cursorUsed.getString(columnIndex)
-                Log.d("Whisper", "Call to load transcription : $transcriptionText")
-                CoroutineScope(Dispatchers.IO).launch {
-                    TranscriptionContentProvider._lastTranscription.emit(Transcription(content = transcriptionText))  // Émettre la nouvelle transcription
+        viewModelScope.launch {
+            merge(
+                isFullySuccessfulLiveData.asFlow(),
+                isRunningLiveData.asFlow(),
+                isGoingToStopLiveData.asFlow(),
+                isFullyStoppedLiveData.asFlow(),
+                isInitializedLiveData.asFlow()
+            ).collect {
+                when {
+                    /*isFullySuccessfulLiveData.value == true -> {
+                        Log.d("HomeViewModel", "isFullySuccessfulLiveData.value: true")
+                        // Observer cachedTranscription
+                        TranscriptionContentProvider.cachedTranscription.collect { cachedValue ->
+                            Log.d("HomeViewModel", "cachedValue: ${cachedValue?.content}")
+                            // Faire quelque chose avec cachedValue, par exemple:
+                            transcription.postValue(cachedValue?.content)
+                        }
+                    }*/
+
+                    isFullyStoppedLiveData.value == true || isInitializedLiveData.value == true -> {
+                        // Observer temporaryText
+                        transcription.postValue("")
+                    }
+
+                    isRunningLiveData.value == true || isGoingToStopLiveData.value == true || isFullySuccessfulLiveData.value == true -> {
+                        // Observer temporaryText
+                        TranscriptionContentProvider.temporaryText.collect { tempText ->
+                            Log.d("HomeViewModel", "tempText: $tempText")
+                            // Faire quelque chose avec tempText
+                            if (tempText != null) {
+                                transcription.postValue(tempText)
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -1,5 +1,6 @@
 package com.example.audio2text
 
+import android.animation.ObjectAnimator
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
@@ -7,19 +8,26 @@ import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.LinearInterpolator
 import android.widget.ImageButton
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.findViewTreeLifecycleOwner
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.progressindicator.LinearProgressIndicator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 
-class MyAdapter(private var dictionaries: List<DictionaryItem>, lifecycleOwner: LifecycleOwner, private val onItemClicked: (Int) -> Unit) :
+class MyAdapter(
+    private var dictionaries: List<DictionaryItem>,
+    private val lifecycleOwner: LifecycleOwner,
+    private val onItemClicked: (Int) -> Unit
+) :
     RecyclerView.Adapter<MyAdapter.MyViewHolder>() {
 
     private var selectedPosition = -1
@@ -28,16 +36,15 @@ class MyAdapter(private var dictionaries: List<DictionaryItem>, lifecycleOwner: 
         val textView: TextView = view.findViewById(R.id.textView)
         val buttonDownload: ImageButton = view.findViewById(R.id.download_button)
         val buttonDelete: ImageButton = view.findViewById(R.id.delete_button)
-        val progress: ProgressBar = view.findViewById(R.id.progressBarDictionary)
+        val progress: LinearProgressIndicator = view.findViewById(R.id.progressBarDictionary)
     }
 
     init {
-        DictionaryViewModelHolder.viewModel.dictionaryItems.observe(lifecycleOwner) { updatedList ->
+        DictionaryViewModelHolder.viewModel.dictionaryItems.observeForever { updatedList ->
             dictionaries = updatedList
-            val positionToUpdate = updatedList.indexOfFirst { it.id == DictionaryViewModelHolder.viewModel.lastUpdatedId }
-            Log.d("TAG", "going to update: ${positionToUpdate}")
+            val positionToUpdate =
+                updatedList.indexOfFirst { it.id == DictionaryViewModelHolder.viewModel.lastUpdatedId }
             if (positionToUpdate != -1) {
-                Log.d("TAG", "updated: ${dictionaries[positionToUpdate].name} at position: ${positionToUpdate}")
                 notifyItemChanged(positionToUpdate)
             }
         }
@@ -58,8 +65,11 @@ class MyAdapter(private var dictionaries: List<DictionaryItem>, lifecycleOwner: 
             // Votre logique pour le téléchargement
             val context = holder.itemView.context // Obtenir le contexte
             holder.buttonDownload.isEnabled = false
+            Log.d("Downloading", "item.id: ${item.id}")
+            // Ajoutez l'ID du dictionnaire à une file d'attente
+            DownloadQueueManager.downloadQueue.add(item.id)
             val intent = Intent(context, DownloadService::class.java).apply {
-                putExtra("dictionaryId", item.id)
+                putExtra("isDownloadingDictionary", true)
             }
             context.startService(intent)
         }
@@ -70,43 +80,60 @@ class MyAdapter(private var dictionaries: List<DictionaryItem>, lifecycleOwner: 
             holder.buttonDownload.visibility = View.VISIBLE
             holder.progress.progress = 0
             holder.buttonDelete.visibility = View.GONE
+            item.isSelected = false
             CoroutineScope(Dispatchers.IO).launch {
-                DictionaryViewModelHolder.viewModel.deleteDictionary(item.id)
+                DictionaryViewModelHolder.viewModel.deleteDictionary(
+                    holder.itemView.context,
+                    item.id
+                )
             }
         }
 
         holder.itemView.setOnClickListener {
-            item.isSelected = !item.isSelected
-            onItemClicked(holder.layoutPosition)
-        }
-
-        if (item.isDownloadComplete) {
-            Log.d("MyAdapter", "dictionaryItem.name: ${item.name} at position: ${position}")
-            holder.progress.progress = 100
-            holder.buttonDownload.visibility = View.GONE
-            holder.buttonDelete.visibility = View.VISIBLE
-            holder.textView.setTypeface(null, Typeface.BOLD)
-        } else if (item.isDownloading) {
-            holder.buttonDownload.isEnabled = false
-            holder.buttonDelete.visibility = View.GONE
-            holder.progress.progress = item.progress
-        } else if (item.isFailed) {
-            holder.buttonDownload.isEnabled = true
-            holder.buttonDelete.visibility = View.GONE
-            // montrer une icône ou un message d'échec si nécessaire
-        } else {
-            // État par défaut
-            holder.buttonDownload.isEnabled = true
-            holder.buttonDelete.visibility = View.GONE
-            holder.progress.progress = 0
-            holder.textView.setTypeface(null, Typeface.NORMAL)
+            if (item.isDownloadComplete) {
+                onItemClicked(holder.layoutPosition)
+            }
         }
 
         if (item.isSelected) {
             holder.itemView.setBackgroundColor(Color.WHITE)  // Mettez la couleur que vous voulez
         } else {
-            holder.itemView.setBackgroundColor(ContextCompat.getColor(holder.itemView.context, R.color.colorBackgroundDico)) // Mettez la couleur par défaut
+            holder.itemView.setBackgroundColor(
+                ContextCompat.getColor(
+                    holder.itemView.context,
+                    R.color.colorBackgroundDico
+                )
+            ) // Mettez la couleur par défaut
         }
+
+        if (item.isDownloadComplete) {
+            Log.d("MyAdapter", "dictionaryItem.name: ${item.name} at position: ${position}")
+            holder.buttonDownload.visibility = View.GONE
+            holder.buttonDelete.visibility = View.VISIBLE
+            holder.buttonDownload.isEnabled = true
+            holder.textView.setTypeface(null, Typeface.BOLD)
+            holder.progress.isIndeterminate = false
+            holder.progress.progress = 100
+        } else if (item.isDownloading) {
+            holder.buttonDownload.isEnabled = false
+            holder.buttonDelete.visibility = View.GONE
+            //holder.progress.progress = item.progress
+            holder.progress.isIndeterminate = true
+        } else if (item.isFailed) {
+            holder.buttonDownload.isEnabled = true
+            holder.buttonDelete.visibility = View.GONE
+            holder.progress.progress = 0
+            holder.progress.isIndeterminate = false
+            // montrer une icône ou un message d'échec si nécessaire
+        } else {
+            // État par défaut
+            holder.buttonDownload.isEnabled = true
+            holder.buttonDelete.visibility = View.GONE
+            holder.textView.setTypeface(null, Typeface.NORMAL)
+            holder.progress.progress = 0
+            holder.progress.isIndeterminate = false
+        }
+
     }
 
     override fun getItemCount() = dictionaries.size

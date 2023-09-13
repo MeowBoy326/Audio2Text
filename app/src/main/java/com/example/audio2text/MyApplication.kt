@@ -4,21 +4,26 @@ import android.app.Application
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.ContentValues.TAG
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
-import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModelProvider
-import java.util.Locale
+import androidx.lifecycle.ViewModelStore
+import io.reactivex.rxjava3.exceptions.UndeliverableException
+import io.reactivex.rxjava3.plugins.RxJavaPlugins
+import java.io.IOException
+import java.net.SocketException
 
 class MyApplication : Application() {
 
     companion object {
         const val CHANNEL_ID = "transcription_channel"
         const val CHANNEL_ID2 = "download_channel"
+        const val CHANNEL_ID3 = "load_dictionary_channel"
     }
 
-    var chosenLang :String = Locale.getDefault().language
+    private val viewModelStore = ViewModelStore()
 
     override fun onCreate() {
         super.onCreate()
@@ -27,15 +32,30 @@ class MyApplication : Application() {
         val name = getString(R.string.channel_name)
         val descriptionText = getString(R.string.channel_description)
         val importance = NotificationManager.IMPORTANCE_LOW
-        val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
+        val channel = createNotificationChannel(applicationContext, CHANNEL_ID, name, importance)
+            /*NotificationChannel(CHANNEL_ID, name, importance).apply {
             description = descriptionText
-        }
+        }*/
         channel.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-        val channel2 =
-            NotificationChannel(CHANNEL_ID2, "Téléchargements", NotificationManager.IMPORTANCE_LOW)
+        val channel2 = createNotificationChannel(applicationContext, CHANNEL_ID2, name, importance)
+            /*NotificationChannel(CHANNEL_ID2, "Téléchargements", NotificationManager.IMPORTANCE_LOW)*/
+
+        val channel3 = createNotificationChannel(applicationContext, CHANNEL_ID3, name, importance)
+            /*NotificationChannel(CHANNEL_ID3, "Chargement du correcteur", NotificationManager.IMPORTANCE_LOW)*/
         val notificationManager: NotificationManager =
             getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.createNotificationChannel(channel)
         notificationManager.createNotificationChannel(channel2)
+        notificationManager.createNotificationChannel(channel3)
+
+        val factory = ViewModelProvider.AndroidViewModelFactory.getInstance(this)
+        HomeViewModelHolder.viewModel = ViewModelProvider(viewModelStore, factory)[HomeViewModel::class.java]
+        DictionaryViewModelHolder.viewModel =
+            ViewModelProvider(viewModelStore, factory)[DictionaryViewModel::class.java]
+        DownloadViewModelHolder.viewModel =
+            ViewModelProvider(viewModelStore, factory)[DownloadViewModel::class.java]
+
+        val sharedPreferences = getSharedPreferences("MyPreferences", Context.MODE_PRIVATE)
+        sharedPreferences.registerOnSharedPreferenceChangeListener(PreferenceChangeListenerUtil.preferenceChangeListener)
     }
 }

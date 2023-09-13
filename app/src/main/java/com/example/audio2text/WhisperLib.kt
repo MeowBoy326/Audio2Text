@@ -10,6 +10,7 @@ import kotlinx.coroutines.*
 import java.io.File
 import java.io.InputStream
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 private const val LOG_TAG = "WhisperLib"
 
@@ -63,6 +64,14 @@ class WhisperContext private constructor(private var ptr: Long) {
         WhisperLib.setTranscriptionSegmentListener(callback)
     }
 
+    fun getSeekDelta(): Int {
+        return WhisperLib.getSeekDelta(ptr)
+    }
+
+    fun getResultLen(): Int {
+        return WhisperLib.getResultLen(ptr)
+    }
+
     fun setInferenceStoppedCallback (callback: InferenceStoppedListener) {
         Log.d("Whisper", "Call to set Inference Stopped Callback")
         WhisperLib.setInferenceStoppedListener(callback)
@@ -73,11 +82,24 @@ class WhisperContext private constructor(private var ptr: Long) {
         WhisperLib.setTranscriptionSegmentListener(callback)
     }
 
-    suspend fun release() = withContext(scope.coroutineContext) {
-        Log.d("Whisper", "Call to release in WhisperLib with ${ptr}")
-        if (ptr != 0L) {
-            WhisperLib.freeContext(ptr)
-            ptr = 0
+    suspend fun release() {
+        try {
+            withContext(scope.coroutineContext) {
+                Log.d("Whisper", "Call to release in WhisperLib with ${ptr}")
+                if (ptr != 0L) {
+                    WhisperLib.freeContext(ptr)
+                    ptr = 0
+                }
+            }
+        } catch (e: CancellationException) {
+            // Gérez l'exception de l'annulation ici
+            Log.e("Whisper", "La tâche a été annulée: ${e.message}")
+        } catch (e: RejectedExecutionException) {
+            // Gérez l'exception du rejet d'exécution ici
+            Log.e("Whisper", "La tâche a été rejetée: ${e.message}")
+        } catch (e: Exception) {
+            // Gérez toutes les autres exceptions ici
+            Log.e("Whisper", "Erreur inattendue: ${e.message}")
         }
     }
 
@@ -178,6 +200,8 @@ private class WhisperLib {
         external fun freeContext(contextPtr: Long)
         external fun fullTranscribe(contextPtr: Long, audioData: FloatArray, languageCode: String, languageToIgnore: String, translate: Boolean, speed: Boolean, initialPrompt: String, maxTextSize: Int, offsetMs: Int, durationMs: Int)
         external fun getTextSegmentCount(contextPtr: Long): Int
+        external fun getSeekDelta(contextPtr: Long): Int
+        external fun getResultLen(contextPtr: Long): Int
         external fun getTextSegment(contextPtr: Long, index: Int): String
         external fun getSystemInfo(): String
         external fun benchMemcpy(nthread: Int): String

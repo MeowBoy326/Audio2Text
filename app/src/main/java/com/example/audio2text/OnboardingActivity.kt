@@ -12,6 +12,7 @@ class OnboardingActivity : AppCompatActivity(), OnboardingPageChangeListener {
         setContentView(R.layout.activity_onboarding)
 
         viewPager = findViewById(R.id.viewPager)
+        viewPager.isUserInputEnabled = false
         viewPager.adapter = OnboardingAdapter(this)
 
         // Récupérez la position enregistrée

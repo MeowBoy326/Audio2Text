@@ -155,11 +155,11 @@ class SettingsFragment : Fragment() {
         savedInstanceState: Bundle?
     ): View {
         val view = inflater.inflate(R.layout.fragment_settings, container, false)
-        val preferences = requireContext().getSharedPreferences("MyPreferences", AppCompatActivity.MODE_PRIVATE)
+        val preferences = requireContext().applicationContext.getSharedPreferences("MyPreferences", AppCompatActivity.MODE_PRIVATE)
 
         // Initialisation des composants de la vue ici, comme les boutons, les commutateurs, etc.
         val adapter = ArrayAdapter(
-            requireContext(),
+            requireContext().applicationContext,
             android.R.layout.simple_spinner_item,
             languages.map { it.first } // Utilisez seulement les noms de langue
         )
@@ -169,7 +169,7 @@ class SettingsFragment : Fragment() {
 
         val spinnerIgnore: Spinner = view.findViewById(R.id.spinner_ignore_language)
 
-        val adapterIgnore = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, languagesToIgnore.map { it.first })
+        val adapterIgnore = ArrayAdapter(requireContext().applicationContext, android.R.layout.simple_spinner_item, languagesToIgnore.map { it.first })
         adapterIgnore.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinnerIgnore.adapter = adapterIgnore
 
@@ -265,7 +265,7 @@ class SettingsFragment : Fragment() {
             if (startTimeInSeconds > endTimeInSeconds) {
                 startTimeInSeconds = endTimeInSeconds
                 numberPickerMinutesStart.value = startTimeInSeconds / 60
-                Toast.makeText(requireContext(), "Le temps de début ne peut pas être supérieur au temps de fin", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext().applicationContext, "Le temps de début ne peut pas être supérieur au temps de fin", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -278,7 +278,7 @@ class SettingsFragment : Fragment() {
             if (startTimeInSeconds > endTimeInSeconds) {
                 startTimeInSeconds = endTimeInSeconds
                 numberPickerSecondsStart.value = startTimeInSeconds % 60
-                Toast.makeText(requireContext(), "Le temps de début ne peut pas être supérieur au temps de fin", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext().applicationContext, "Le temps de début ne peut pas être supérieur au temps de fin", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -291,7 +291,7 @@ class SettingsFragment : Fragment() {
             if (endTimeInSeconds < startTimeInSeconds) {
                 endTimeInSeconds = startTimeInSeconds
                 numberPickerMinutesEnd.value = endTimeInSeconds / 60
-                Toast.makeText(requireContext(), "Le temps de fin ne peut pas être inférieur au temps de début", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext().applicationContext, "Le temps de fin ne peut pas être inférieur au temps de début", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -304,7 +304,7 @@ class SettingsFragment : Fragment() {
             if (endTimeInSeconds < startTimeInSeconds) {
                 endTimeInSeconds = startTimeInSeconds
                 numberPickerSecondsEnd.value = endTimeInSeconds % 60
-                Toast.makeText(requireContext(), "Le temps de fin ne peut pas être inférieur au temps de début", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext().applicationContext, "Le temps de fin ne peut pas être inférieur au temps de début", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -326,13 +326,6 @@ class SettingsFragment : Fragment() {
                 putInt("maxTextSize", maxTextSize)
                 //putInt("LastPosition", -1)
             }.apply()
-
-            val app = requireActivity().application as MyApplication
-            if (languageSelected == "auto") {
-                app.chosenLang = Locale.getDefault().language
-            } else {
-                app.chosenLang = languageSelected
-            }
 
             val lastPosition = preferences.getInt("LastPosition", 0)
 
@@ -379,7 +372,7 @@ class SettingsFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        val preferences = requireContext().getSharedPreferences("MyPreferences", Context.MODE_PRIVATE)
+        val preferences = requireContext().applicationContext.getSharedPreferences("MyPreferences", Context.MODE_PRIVATE)
         val isRunning = preferences.getBoolean("isRunning", false)
 
         buttonConfirm.isEnabled = !isRunning

@@ -719,6 +719,9 @@ struct whisper_context {
     whisper_vocab vocab;
     whisper_state * state = nullptr;
 
+    int result_len;
+    int seek_delta;
+
     std::string path_model; // populated by whisper_init_from_file()
 };
 
@@ -738,6 +741,20 @@ whisper_segment* get_last_segment(whisper_state* state) {
 
     // Retournez le pointeur vers le segment
     return segment;
+}
+
+int get_seek_delta(whisper_context* ctx) {
+    if (ctx != nullptr) {
+        return ctx->seek_delta;
+    }
+    return 0;
+}
+
+int get_result_len(whisper_context* ctx) {
+    if (ctx != nullptr) {
+        return ctx->seek_delta;
+    }
+    return 0;
 }
 
 /*IMPORTANT FUNCTION TO KEEP*/
@@ -3558,7 +3575,7 @@ static inline bool should_split_on_word(const char * txt, bool split_on_word) {
     return txt[0] == ' ';
 }
 
-static int whisper_wrap_segment(struct whisper_context & ctx, struct whisper_state & state, int max_len, bool split_on_word, bool split_on_punctuation) {
+/*static int whisper_wrap_segment(struct whisper_context & ctx, struct whisper_state & state, int max_len, bool split_on_word, bool split_on_punctuation) {
     auto &segment = state.result_all.back();
     int res = 1;
     int acc = 0;
@@ -3619,9 +3636,9 @@ static int whisper_wrap_segment(struct whisper_context & ctx, struct whisper_sta
     }
 
     return res;
-}
+}*/
 
-/*static int whisper_wrap_segment(struct whisper_context & ctx, struct whisper_state & state, int max_len, bool split_on_word, bool split_on_punctuation) {
+static int whisper_wrap_segment(struct whisper_context & ctx, struct whisper_state & state, int max_len, bool split_on_word) {
     auto segment = state.result_all.back();
 
     int res = 1;
@@ -3672,7 +3689,7 @@ static int whisper_wrap_segment(struct whisper_context & ctx, struct whisper_sta
     state.result_all.back().text = std::move(text);
 
     return res;
-}*/
+}
 
 static const std::vector<std::string> non_speech_tokens = {
         "\"", "#", "(", ")", "*", "+", "/", ":", ";", "<", "=", ">", "@", "[", "\\", "]", "^",
@@ -4506,20 +4523,11 @@ int whisper_full_with_state(
 
                 // if we have already generated some text, use it as a prompt to condition the next generation
                 if (!prompt_past.empty() && t_cur < 0.5f && params.n_max_text_ctx > 0) {
-                                        int n_take = std::min(std::min(params.n_max_text_ctx, whisper_n_text_ctx(ctx)/2), int(prompt_past.size()));
+                    int n_take = std::min(std::min(params.n_max_text_ctx, whisper_n_text_ctx(ctx)/2), int(prompt_past.size()));
 
                     prompt = { whisper_token_prev(ctx) };
                     prompt.insert(prompt.begin() + 1, prompt_past.end() - n_take, prompt_past.end());
-
-                    std::ostringstream oss;
-                    oss << "prompt_past: ";
-                    for (const auto & token : prompt_past) {
-                        const char* decoded_str = whisper_token_to_str(ctx, token);  // Remplacer `ctx` par votre instance de `whisper_context`
-                        if (decoded_str) { // Vérification en cas de pointeur nul
-                            oss << decoded_str << " ";
-                        }
-                    }
-                                    }
+                }
 
                 // init new transcription with sot, language (opt) and task tokens
                 prompt.insert(prompt.end(), prompt_init.begin(), prompt_init.end());
@@ -4716,15 +4724,6 @@ int whisper_full_with_state(
                     {
                         const auto & token = decoder.sequence.tokens.back();
 
-                        if (ctx->isStopped) {
-                                                        if (params.inferenceStoppedCallback) {
-                                params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
-                            }
-                            //whisper_free(ctx);
-                            return 1;
-                        } else {
-                                                    }
-
                         // timestamp token - update sliding window
                         if (token.id > whisper_token_beg(ctx)) {
                             const int seek_delta_new = 2*(token.id - whisper_token_beg(ctx));
@@ -4747,14 +4746,7 @@ int whisper_full_with_state(
                                     __func__, i, j, token.id, token.p, tt.c_str(), token.pt, result_len, ctx->vocab.id_to_token.at(token.id).c_str());
                         }
 #endif
-                        if (ctx->isStopped) {
-                                                        if (params.inferenceStoppedCallback) {
-                                params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
-                            }
-                            //whisper_free(ctx);
-                            return 1;
-                        } else {
-                                                    }
+
                         // end of segment
                         if (token.id == whisper_token_eot(ctx) ||               // end of text token
                             (params.max_tokens > 0 && i >= params.max_tokens) || // max tokens per segment reached
@@ -4774,18 +4766,12 @@ int whisper_full_with_state(
                                 seek_delta = 100*WHISPER_CHUNK_SIZE;
                             }
 
+                            ctx->seek_delta = seek_delta;
+                            ctx->result_len = result_len;
+
                             completed = true;
                             continue;
                         }
-
-                        if (ctx->isStopped) {
-                                                        if (params.inferenceStoppedCallback) {
-                                params.inferenceStoppedCallback(ctx, ctx->state, params.inferenceStoppedCallback_user_data);
-                            }
-                            //whisper_free(ctx);
-                            return 1;
-                        } else {
-                                                    }
 
                         // TESTS: if no tensors are loaded, it means we are running tests
                         if (ctx->model.n_loaded == 0) {
@@ -5030,7 +5016,7 @@ int whisper_full_with_state(
 
                                 
                                 if (params.max_len > 0) {
-                                    n_new = whisper_wrap_segment(*ctx, *state, params.max_len, params.split_on_word, params.split_on_punctuation);
+                                    n_new = whisper_wrap_segment(*ctx, *state, params.max_len, params.split_on_word);
                                     /*if (!state->result_all.empty()) {
                                         auto & segment = state->result_all.back(); // Accès au dernier segment
 
@@ -5097,7 +5083,7 @@ int whisper_full_with_state(
 
                         
                         if (params.max_len > 0) {
-                            n_new = whisper_wrap_segment(*ctx, *state, params.max_len, params.split_on_word, params.split_on_punctuation);
+                            n_new = whisper_wrap_segment(*ctx, *state, params.max_len, params.split_on_word);
                             /*if (!state->result_all.empty()) {
                                 auto & segment = state->result_all.back(); // Accès au dernier segment
 

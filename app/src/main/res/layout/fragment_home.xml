@@ -23,28 +23,18 @@
             android:textAlignment="center"
             android:textSize="24sp" />
 
-        <ScrollView
-            android:id="@+id/scrollView"
+        <EditText
+            android:id="@+id/resultEditText"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="textMultiLine"
+            android:scrollbars="vertical"
+            android:textSize="20sp"
             android:layout_marginBottom="90dp"
             android:padding="16dp"
-            android:contentDescription="@string/description_of_content">
-
-            <EditText
-                android:id="@+id/resultEditText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="30dp"
-                android:inputType="textMultiLine|textAutoCorrect"
-                android:scrollbars="vertical"
-                android:enabled="false"
-                android:textSize="20sp"
-                android:imeOptions="actionNone"
-                android:background="@android:color/transparent"
-                android:visibility="gone"/>
-
-        </ScrollView>
+            android:imeOptions="actionNone"
+            android:background="@android:color/transparent"
+            android:visibility="gone"/>
 
         <View
             android:id="@+id/borderView"

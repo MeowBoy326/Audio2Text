@@ -15,6 +15,12 @@
     </fragment>
 
     <fragment
+        android:id="@+id/premiumFragment"
+        android:name="com.example.audio2text.PremiumFragment"
+        android:label="Premium">
+    </fragment>
+
+    <fragment
         android:id="@+id/settingsFragment"
         android:name="com.example.audio2text.SettingsFragment"
         android:label="Paramètres">

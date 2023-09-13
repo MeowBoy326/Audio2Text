@@ -337,11 +337,11 @@ Java_com_example_audio2text_WhisperLib_00024Companion_fullTranscribe(
     params.translate = translate;
     params.speed_up = speed;
     params.n_threads = max_threads;
-    params.no_context = false;
-    params.split_on_punctuation = true;
+    params.no_context = true;
     params.max_len = maxTextSize;
-    params.n_max_text_ctx = 3*maxTextSize;
+    params.n_max_text_ctx = 0;
     params.single_segment = false;
+    params.split_on_word = true;
     params.progress_callback = myProgressCallback;
     params.progress_callback_user_data = env;
     params.new_segment_callback = mySegmentCallback;
@@ -349,8 +349,10 @@ Java_com_example_audio2text_WhisperLib_00024Companion_fullTranscribe(
     params.inferenceStoppedCallback = myAbortingCallback;
     params.inferenceStoppedCallback_user_data = env;
     params.beam_search.beam_size = 5;
-    params.greedy.best_of = 5;
+    params.greedy.best_of = 3;
     params.temperature_inc = 0.2f;
+    params.thold_pt = 0.02f;
+    params.length_penalty = 1.0f;
     params.ignore_lang_id = languageCodeToIgnoreChar;
     params.initial_prompt = initial_prompt_char;
     params.offset_ms = offset_ms;
@@ -373,6 +375,24 @@ Java_com_example_audio2text_WhisperLib_00024Companion_fullTranscribe(
         whisper_print_timings(context);
     }
     env->ReleaseFloatArrayElements(audio_data, audio_data_arr, JNI_ABORT);
+}
+
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_example_audio2text_WhisperLib_00024Companion_getSeekDelta(JNIEnv *env, jobject thiz, jlong context_ptr) {
+    UNUSED(env);
+    UNUSED(thiz);
+    auto *context = (struct whisper_context *) context_ptr;
+    return (jint) get_seek_delta(context);
+}
+
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_example_audio2text_WhisperLib_00024Companion_getResultLen(JNIEnv *env, jobject thiz, jlong context_ptr) {
+    UNUSED(env);
+    UNUSED(thiz);
+    auto *context = (struct whisper_context *) context_ptr;
+    return (jint) get_result_len(context);
 }
 
 extern "C" JNIEXPORT jint JNICALL

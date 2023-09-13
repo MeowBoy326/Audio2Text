@@ -38,6 +38,7 @@
             android:layout_below="@id/thunder_logo"
             android:progressBackgroundTintMode="src_atop"
             android:padding="50dp"
+            android:max="100"
             android:visibility="gone"/>
 
         <RadioGroup

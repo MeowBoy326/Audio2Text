@@ -6,7 +6,7 @@
             android:icon="@drawable/home_icon"
             android:title="Acceuil" />
         <item
-            android:id="@+id/buy"
+            android:id="@+id/premiumFragment"
             android:icon="@drawable/premium_icon"
             android:title="Premium" />
         <item
