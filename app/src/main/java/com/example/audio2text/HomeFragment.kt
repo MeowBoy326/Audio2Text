@@ -48,6 +48,12 @@ import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import com.google.android.gms.ads.AdListener
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.AdView
+import com.google.android.gms.ads.LoadAdError
+import com.google.android.gms.ads.MobileAds
+import com.google.android.gms.ads.RequestConfiguration
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import io.gitlab.rxp90.jsymspell.TokenWithContext
 import io.gitlab.rxp90.jsymspell.api.SuggestItem
@@ -62,6 +68,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.util.Arrays
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
@@ -85,6 +92,8 @@ class HomeFragment : Fragment() {
     private lateinit var preferences: SharedPreferences
     lateinit var selectFileButton: FloatingActionButton
     lateinit var transcriptionText: EditText
+    private var lastClickedInfo: MisspelledWordInfo? = null
+    lateinit var mAdView : AdView
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreateView(
@@ -96,6 +105,41 @@ class HomeFragment : Fragment() {
         header = view.findViewById(R.id.header)
         stopTranscriptionButton = view.findViewById(R.id.stop_transcription_fab)
         selectFileButton = view.findViewById(R.id.select_file_fab)
+
+        mAdView = view.findViewById(R.id.adView)
+        val adRequest = AdRequest.Builder().build()
+        mAdView.loadAd(adRequest)
+
+        mAdView.adListener = object: AdListener() {
+            override fun onAdClicked() {
+                // Code to be executed when the user clicks on an ad.
+            }
+
+            override fun onAdClosed() {
+                // Code to be executed when the user is about to return
+                // to the app after tapping on an ad.
+            }
+
+            override fun onAdFailedToLoad(adError : LoadAdError) {
+                // Code to be executed when an ad request fails.
+                Log.d("HomeFragment", "Ad failed to load with : ${adError.message}")
+            }
+
+            override fun onAdImpression() {
+                // Code to be executed when an impression is recorded
+                // for an ad.
+            }
+
+            override fun onAdLoaded() {
+                // Code to be executed when an ad finishes loading.
+                Log.d("HomeFragment", "Ad Loaded successfully")
+            }
+
+            override fun onAdOpened() {
+                // Code to be executed when an ad opens an overlay that
+                // covers the screen.
+            }
+        }
 
         return view
     }
@@ -140,6 +184,7 @@ class HomeFragment : Fragment() {
                     Log.d("HomeFragment", "transcription: $value")
                     if (value != null) {
                         transcriptionText.setText(value)
+                        transcriptionText.setSelection(transcriptionText.text.length)
                     }
                 }
             })
@@ -206,6 +251,7 @@ class HomeFragment : Fragment() {
                         HomeViewModelHolder.viewModel.isTranscriptionTextEnabled.postValue(false)
                         HomeViewModelHolder.viewModel.isTranscriptionTextVisible.postValue(true)
                         HomeViewModelHolder.viewModel.isEditableTranscriptionText.postValue(false)
+                        HomeViewModelHolder.viewModel.loadTranscription(requireContext().applicationContext)
                     }
                 }
             })
@@ -224,6 +270,7 @@ class HomeFragment : Fragment() {
                         HomeViewModelHolder.viewModel.isTranscriptionTextEnabled.postValue(false)
                         HomeViewModelHolder.viewModel.isTranscriptionTextVisible.postValue(true)
                         HomeViewModelHolder.viewModel.isEditableTranscriptionText.postValue(false)
+                        HomeViewModelHolder.viewModel.loadTranscription(requireContext().applicationContext)
                     }
                 }
             })
@@ -243,6 +290,7 @@ class HomeFragment : Fragment() {
                         HomeViewModelHolder.viewModel.isSelectFileButtonVisible.postValue(true)
                         HomeViewModelHolder.viewModel.isSelectFileButtonEnabled.postValue(true)
                         HomeViewModelHolder.viewModel.isEditableTranscriptionText.postValue(false)
+                        preferences.edit()?.putString("WorkRequestId", null)?.apply()
                     }
                 }
             })
@@ -261,6 +309,8 @@ class HomeFragment : Fragment() {
                         HomeViewModelHolder.viewModel.isTranscriptionTextEnabled.postValue(true)
                         HomeViewModelHolder.viewModel.isTranscriptionTextVisible.postValue(true)
                         HomeViewModelHolder.viewModel.isHeaderVisible.postValue(false)
+                        preferences.edit()?.putString("WorkRequestId", null)?.apply()
+                        transcriptionText.setSelection(0)
                     }
                 }
             })
@@ -373,7 +423,7 @@ class HomeFragment : Fragment() {
             selectAudioFileLauncher.launch(intent)
         }
 
-        val workId = preferences?.getString("WorkRequestId", null)?.let {
+        val workId = preferences.getString("WorkRequestId", null)?.let {
             UUID.fromString(it)
         }
 
@@ -390,7 +440,7 @@ class HomeFragment : Fragment() {
                     }
                 }
                 val tempFilePath = tempFile.absolutePath
-                preferences?.edit()?.putString("tempFilePath", tempFilePath)?.apply()
+                preferences.edit()?.putString("tempFilePath", tempFilePath)?.apply()
 
                 withContext(Dispatchers.Main) {
                     startTranscription(tempFilePath)
@@ -442,7 +492,7 @@ class HomeFragment : Fragment() {
             .setInputData(workDataOf("audioFilePath" to inputFilePath))
             .build()
 
-        preferences?.edit()?.putString("WorkRequestId", workRequest.id.toString())?.apply()
+        preferences.edit()?.putString("WorkRequestId", workRequest.id.toString())?.apply()
 
         WorkManager.getInstance(requireContext().applicationContext).enqueue(workRequest)
 
@@ -450,6 +500,9 @@ class HomeFragment : Fragment() {
         preferences.edit().putBoolean("isFullyStopped", false).apply()
         preferences.edit().putBoolean("isFullySuccessful", false).apply()
         preferences.edit().putBoolean("isRunning", true).apply()
+
+        SpellCheckerSingleton.isSpellCheckerReady.postValue(false)
+        HomeViewModelHolder.viewModel.isSpellAlreadyRequested.postValue(false)
 
         observeWorkStatus(workRequest.id)
     }
@@ -461,7 +514,7 @@ class HomeFragment : Fragment() {
             isEnabled = true  // Gardez cela toujours à 'true'
             isCursorVisible = enabled
             keyListener = if (enabled) EditText(this.context).keyListener else null
-            movementMethod = CustomLinkMovementMethod()
+            movementMethod = if (enabled) ScrollingMovementMethod() else LinkMovementMethod()
         }
     }
 
@@ -472,26 +525,15 @@ class HomeFragment : Fragment() {
                     Log.d("ENTERREEDDD:::", value.toString())
                     if (value.state.isFinished) {
                         // Update UI with progress here
-                        if (value.state == WorkInfo.State.CANCELLED || value.state == WorkInfo.State.FAILED) {
+                        if (value.state == WorkInfo.State.CANCELLED) {
                             // Handle cancellation here
                             Log.d("Whisper", "Job was cancelled")
-                            val isStoppedBeforeInference =
-                                preferences.getBoolean("stoppedBeforeInference", false)
-                            val isStoppedDuringInference = preferences.getBoolean(
-                                "stoppedDuringInference", false
-                            )
-                            if (isStoppedBeforeInference) {
-                                preferences.edit()?.putBoolean("isRunning", false)?.apply()
-                                preferences.edit()?.putBoolean("isFullyStopped", true)?.apply()
-                            } else if (isStoppedDuringInference) {
-                                CoroutineScope(Dispatchers.IO).launch {
-                                    TranscriptionWorker.releaseResources(true)
-                                }
-                            }
 
-                            notificationManager.cancel(NOTIFICATION_ID)
+                            //notificationManager.cancel(NOTIFICATION_ID)
+                        }
 
-                            preferences.edit()?.putString("WorkRequestId", null)?.apply()
+                        if (value.state == WorkInfo.State.FAILED) {
+                            stopTranscription()
                         }
 
                         if (value.state == WorkInfo.State.BLOCKED) {
@@ -507,14 +549,12 @@ class HomeFragment : Fragment() {
                                 TranscriptionWorker.releaseResources()
                             }
 
-                            preferences?.edit()?.putBoolean("isRunning", false)?.apply()
-                            preferences?.edit()?.putBoolean("isFullySuccessful", true)?.apply()
+                            preferences.edit()?.putBoolean("isRunning", false)?.apply()
+                            preferences.edit()?.putBoolean("isFullySuccessful", true)?.apply()
 
                             //viewModel.isTranscriptionTextEnabled.value = true
                             //viewModel.isStopTranscriptionButtonVisible.value = false
                             //viewModel.isSelectFileButtonVisible.value = true
-
-                            preferences?.edit()?.putString("WorkRequestId", null)?.apply()
                             //HomeViewModelHolder.viewModel.isEditableTranscriptionText.postValue(false)
                         }
                     }
@@ -527,6 +567,12 @@ class HomeFragment : Fragment() {
 
     fun calculateLineTop(start: Int, editText: EditText): Pair<Int, Int> {
         val layout = editText.layout
+
+        // Vérification que 'start' est dans les limites du texte de l'EditText
+        if (start >= editText.length()) {
+            return Pair(0, 0)  // Retourner des valeurs par défaut si 'start' est hors limites
+        }
+
         val line = layout.getLineForOffset(start)
         val baseline = layout.getLineBaseline(line)
         val ascent = layout.getLineAscent(line)
@@ -545,12 +591,15 @@ class HomeFragment : Fragment() {
         }
 
         val x = layout.getPrimaryHorizontal(start)
-            .toInt() + editText.scrollX // take into account the scrolled position
-        return Pair(x, visibleY)
+            .toInt() + editText.scrollX  // take into account the scrolled position
+
+        val xOffset = 20  // Décalage en pixels sur l'axe des x
+        val yOffset = 20  // Décalage en pixels sur l'axe des y
+
+        return Pair(x + xOffset, visibleY + yOffset)
     }
 
     private var currentListPopupWindow: ListPopupWindow? = null
-    private var lastClickedInfo: MisspelledWordInfo? = null
 
     fun applySpellingMarks() {
         val ssb = SpannableStringBuilder(transcriptionText.text)
@@ -569,6 +618,8 @@ class HomeFragment : Fragment() {
                     lastClickedInfo = info  // Sauvegarder la dernière information sur le mot cliqué
                 }
             }
+
+            Log.d("HomeFragment","start is ${info.start} at ${info.suggestions.get(0)}")
 
             ssb.setSpan(
                 clickableSpan,
@@ -593,7 +644,7 @@ class HomeFragment : Fragment() {
         // Utilisation du thread principal de l'UI pour les modifications de l'UI
         activity?.runOnUiThread {
             transcriptionText.text = ssb
-            transcriptionText.movementMethod = CustomLinkMovementMethod()
+            transcriptionText.movementMethod = LinkMovementMethod()
         }
     }
 
@@ -618,21 +669,13 @@ class HomeFragment : Fragment() {
 
             // Étape 3: Réinitialiser la méthode de mouvement
             transcriptionText.movementMethod =
-                CustomLinkMovementMethod()  // ou une autre méthode de mouvement par défaut
+                ScrollingMovementMethod()  // ou une autre méthode de mouvement par défaut
         }
     }
 
     private fun stopTranscription() {
         // Annuler le travail de transcription
-        Log.d("Whisper", "Annuler le travail de transcription")
-
-        val showText =
-            "Arrêt en cours. Veuillez patienter..."
-        Log.d("Whisper", "Call to stop during inference")
-        HomeViewModelHolder.viewModel.saveTemporaryTranscription(showText)
-        preferences.edit()?.putBoolean("isRunning", false)?.apply()
-        preferences.edit()?.putBoolean("isGoingToStop", true)?.apply()
-        preferences.edit().putBoolean("stoppedDuringInference", true).apply()
+        /*Log.d("Whisper", "Annuler le travail de transcription")
 
         val workId = preferences.getString("WorkRequestId", null)
         if (workId != null) {
@@ -640,27 +683,46 @@ class HomeFragment : Fragment() {
 
             WorkManager.getInstance(requireContext().applicationContext)
                 .cancelWorkById(workRequestId)
-        }
+        }*/
+        val stopTranscriptionIntent =
+            Intent(context, StopTranscriptionReceiver::class.java).apply {
+                action = "STOP_TRANSCRIPTION"
+                //putExtra("WORK_ID", workRequestId.toString())
+            }
 
-        val tempFilePath = preferences.getString("tempFilePath", "")
-        val tempFile = tempFilePath?.let { File(it) }
-        if (tempFile?.exists() == true) {
-            tempFile.delete()
-        }
-
-        // Nettoyer la textview et les SharedPreferences
-        requireActivity().contentResolver.delete(
-            TranscriptionContentProvider.CONTENT_URI,
-            null,
-            null
-        )
-        HomeViewModelHolder.viewModel.transcription.value = ""
+        requireContext().applicationContext.sendBroadcast(stopTranscriptionIntent)
     }
 
     private fun replaceWord(start: Int, end: Int, newWord: String) {
         val ssb = SpannableStringBuilder(transcriptionText.text)
         ssb.replace(start, end, newWord)
         transcriptionText.text = ssb
+
+        // Calculer le décalage induit par le remplacement du mot
+        val offset = newWord.length - (end - start)
+
+        // Variable pour stocker l'info à supprimer
+        var infoToRemove: MisspelledWordInfo? = null
+
+        // Mettre à jour les indices des mots mal orthographiés
+        for (info in HomeViewModelHolder.viewModel.misspelledWords) {
+            if (info.start == start && info.end == end) {
+                // Mettre à jour les indices du mot remplacé
+                info.end = start + newWord.length
+
+                // Marquer ce mot pour suppression car il est maintenant correct
+                infoToRemove = info
+            } else if (info.start > end) {
+                // Mettre à jour les indices des mots suivants
+                info.start += offset
+                info.end += offset
+            }
+        }
+
+        // Supprimer le mot corrigé de la liste des mots mal orthographiés
+        if (infoToRemove != null) {
+            HomeViewModelHolder.viewModel.misspelledWords.remove(infoToRemove)
+        }
     }
 
     private fun showSuggestionsMenu(
@@ -692,6 +754,7 @@ class HomeFragment : Fragment() {
         listPopupWindow.setOnItemClickListener { _, _, newPosition, _ ->
             removeStylingFromWord(start, end)
             replaceWord(start, end, suggestions[newPosition])
+            applySpellingMarks()
             listPopupWindow.dismiss()
         }
 

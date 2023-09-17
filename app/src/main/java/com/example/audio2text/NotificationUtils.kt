@@ -23,6 +23,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.work.WorkManager
@@ -33,7 +34,6 @@ import java.util.UUID
  */
 fun createNotification(
     context: Context,
-    workRequestId: UUID,
     notificationTitle: String,
     showProgress: Boolean = false,
     progress: Int = 0
@@ -41,14 +41,27 @@ fun createNotification(
     val channelId = MyApplication.CHANNEL_ID
     val cancelText = context.getString(R.string.cancel_processing)
     val name = context.getString(R.string.channel_name)
-    val cancelIntent = WorkManager.getInstance(context).createCancelPendingIntent(workRequestId)
+    val stopTranscriptionIntent =
+        Intent(context, StopTranscriptionReceiver::class.java).apply {
+            action = "STOP_TRANSCRIPTION"
+            //putExtra("WORK_ID", workRequestId.toString())
+        }
+
+    val stopTranscriptionPendingIntent = PendingIntent.getBroadcast(
+        context,
+        0,
+        stopTranscriptionIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    //val cancelIntent = WorkManager.getInstance(context).createCancelPendingIntent(workRequestId, stopTranscriptionIntent)
 
     val builder = NotificationCompat.Builder(context, channelId)
         .setContentTitle(notificationTitle)
         .setTicker(notificationTitle)
         .setSmallIcon(R.drawable.notification_icon)
         .setOngoing(true)
-        .addAction(android.R.drawable.ic_delete, cancelText, cancelIntent)
+        .addAction(android.R.drawable.ic_delete, cancelText, stopTranscriptionPendingIntent)
 
     if (showProgress) {
         builder.setProgress(100, progress, false)

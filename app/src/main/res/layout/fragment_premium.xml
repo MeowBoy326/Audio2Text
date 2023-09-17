@@ -15,13 +15,23 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent">
 
+        <TextView
+            android:id="@+id/textPremium"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerHorizontal="true"
+            android:textAlignment="center"
+            android:layout_alignParentTop="true"
+            android:text="Abonnez-vous pour plus de fonctionnalités !"
+            android:textSize="25sp" />
+
         <!-- Tableau -->
         <TableLayout
             android:id="@+id/compare_functions_table"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_margin="16dp"
-            android:layout_alignParentTop="true"
+            android:layout_centerInParent="true"
             android:layout_above="@id/subscription_layout"
             android:layout_marginTop="16dp"
             android:stretchColumns="*">
@@ -225,77 +235,6 @@
                     android:scaleType="fitCenter"
                     android:visibility="invisible"
                     android:maxHeight="40dp"
-                    android:adjustViewBounds="true"
-                    android:padding="8dp"
-                    android:src="@drawable/check_icon" />
-
-                <ImageView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:scaleType="fitCenter"
-                    android:adjustViewBounds="true"
-                    android:layout_gravity="center"
-                    android:maxHeight="40dp"
-                    android:gravity="center"
-                    android:padding="8dp"
-                    android:src="@drawable/check_icon" />
-            </TableRow>
-
-            <TableRow android:background="@drawable/cell_border_top_sides">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:gravity="center"
-                    android:padding="8dp"
-                    android:text="Paramètres standards" />
-
-                <ImageView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:gravity="center"
-                    android:layout_gravity="center"
-                    android:scaleType="fitCenter"
-                    android:maxHeight="40dp"
-                    android:adjustViewBounds="true"
-                    android:padding="8dp"
-                    android:src="@drawable/check_icon" />
-
-                <ImageView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:scaleType="fitCenter"
-                    android:adjustViewBounds="true"
-                    android:layout_gravity="center"
-                    android:maxHeight="40dp"
-                    android:gravity="center"
-                    android:padding="8dp"
-                    android:src="@drawable/check_icon" />
-            </TableRow>
-
-            <TableRow android:background="@drawable/cell_border_top_sides">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:gravity="center"
-                    android:padding="8dp"
-                    android:text="Paramètres avancés" />
-
-                <ImageView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:gravity="center"
-                    android:layout_gravity="center"
-                    android:scaleType="fitCenter"
-                    android:maxHeight="40dp"
-                    android:visibility="invisible"
                     android:adjustViewBounds="true"
                     android:padding="8dp"
                     android:src="@drawable/check_icon" />

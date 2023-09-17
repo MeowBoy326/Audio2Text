@@ -24,11 +24,11 @@ class WhisperContext private constructor(private var ptr: Long) {
 
     private val ACTION_UPDATE_PROGRESS = "com.example.action.UPDATE_PROGRESS"
 
-    suspend fun transcribeData(data: FloatArray, languageCode: String, languageCodeToIgnore: String, translate: Boolean, speed: Boolean, initialPrompt: String, maxTextSize: Int, offsetMs: Int, durationMs: Int): String = withContext(scope.coroutineContext) {
+    suspend fun transcribeData(data: FloatArray, languageCode: String, languageCodeToIgnore: String, translate: Boolean, speed: Boolean, initialPrompt: String, maxTextSize: Int): String = withContext(scope.coroutineContext) {
         Log.d(LOG_TAG, "Transcription started for data segment") // Log when transcription starts
         require(ptr != 0L)
         val startTime = System.currentTimeMillis()
-        WhisperLib.fullTranscribe(ptr, data, languageCode, languageCodeToIgnore, translate, speed, initialPrompt, maxTextSize, offsetMs, durationMs)
+        WhisperLib.fullTranscribe(ptr, data, languageCode, languageCodeToIgnore, translate, speed, initialPrompt, maxTextSize)
         val endTime = System.currentTimeMillis()
         Log.d(TAG, "Temps d'exécution pour la méthode fullTranscribe : ${endTime - startTime} ms")
         val textCount = WhisperLib.getTextSegmentCount(ptr)
@@ -198,7 +198,7 @@ private class WhisperLib {
         external fun initContextFromAsset(assetManager: AssetManager, assetPath: String): Long
         external fun initContext(modelPath: String): Long
         external fun freeContext(contextPtr: Long)
-        external fun fullTranscribe(contextPtr: Long, audioData: FloatArray, languageCode: String, languageToIgnore: String, translate: Boolean, speed: Boolean, initialPrompt: String, maxTextSize: Int, offsetMs: Int, durationMs: Int)
+        external fun fullTranscribe(contextPtr: Long, audioData: FloatArray, languageCode: String, languageToIgnore: String, translate: Boolean, speed: Boolean, initialPrompt: String, maxTextSize: Int)
         external fun getTextSegmentCount(contextPtr: Long): Int
         external fun getSeekDelta(contextPtr: Long): Int
         external fun getResultLen(contextPtr: Long): Int

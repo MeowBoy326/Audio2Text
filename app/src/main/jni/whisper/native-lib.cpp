@@ -306,7 +306,7 @@ Java_com_example_audio2text_WhisperLib_00024Companion_freeContext(
 extern "C" JNIEXPORT void JNICALL
 Java_com_example_audio2text_WhisperLib_00024Companion_fullTranscribe(
         JNIEnv *env, jobject thiz, jlong context_ptr, jfloatArray audio_data, jstring language_code, jstring language_to_ignore,
-        jboolean translate, jboolean speed, jstring initial_prompt, jint maxTextSize, jint offset_ms, jint duration_ms) {
+        jboolean translate, jboolean speed, jstring initial_prompt, jint maxTextSize) {
     UNUSED(thiz);
     auto *context = (struct whisper_context *) context_ptr;
     jfloat *audio_data_arr = env->GetFloatArrayElements(audio_data, nullptr);
@@ -314,7 +314,7 @@ Java_com_example_audio2text_WhisperLib_00024Companion_fullTranscribe(
 
     // Leave 2 processors free (i.e. the high-efficiency cores).
     int max_threads = max(1, min(8, get_nprocs() - 2));
-    LOGI("Selecting %d threads", max_threads);
+    __android_log_print(ANDROID_LOG_DEBUG,"Native-lib","Selecting %d threads", max_threads);
 
     const char *languageCodeChar = env->GetStringUTFChars(language_code, nullptr);
     const char *languageCodeToIgnoreChar = env->GetStringUTFChars(language_to_ignore, nullptr);
@@ -331,15 +331,15 @@ Java_com_example_audio2text_WhisperLib_00024Companion_fullTranscribe(
     params.token_timestamps = true;
     params.print_realtime = false;
     params.print_progress = true;
-    params.print_timestamps = false;
+    params.print_timestamps = true;
     params.print_special = false;
     params.language = languageCodeChar;
     params.translate = translate;
     params.speed_up = speed;
-    params.n_threads = max_threads;
+    params.n_threads = 1;
     params.no_context = true;
     params.max_len = maxTextSize;
-    params.n_max_text_ctx = 0;
+    params.n_max_text_ctx = 150;
     params.single_segment = false;
     params.split_on_word = true;
     params.progress_callback = myProgressCallback;
@@ -349,14 +349,12 @@ Java_com_example_audio2text_WhisperLib_00024Companion_fullTranscribe(
     params.inferenceStoppedCallback = myAbortingCallback;
     params.inferenceStoppedCallback_user_data = env;
     params.beam_search.beam_size = 5;
-    params.greedy.best_of = 3;
+    params.greedy.best_of = 5;
     params.temperature_inc = 0.2f;
-    params.thold_pt = 0.02f;
-    params.length_penalty = 1.0f;
+    params.entropy_thold = 2.4f;
+    params.logprob_thold = -1.0f;
     params.ignore_lang_id = languageCodeToIgnoreChar;
     params.initial_prompt = initial_prompt_char;
-    params.offset_ms = offset_ms;
-    params.duration_ms = duration_ms;
     //params.speed_up = true;
 
     whisper_reset_timings(context);

@@ -10,4 +10,8 @@
             <certificates src="user" />
         </trust-anchors>
     </debug-overrides>
+    <!-- Ajouter la configuration pour autoriser le trafic en clair -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">127.0.0.1</domain>
+    </domain-config>
 </network-security-config>

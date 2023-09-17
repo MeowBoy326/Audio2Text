@@ -1,17 +1,14 @@
 package com.example.audio2text
 
-import android.app.Dialog
 import android.app.NotificationManager
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Rect
 import android.net.Uri
 import android.os.Bundle
-import android.text.method.KeyListener
 import android.util.Log
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -20,15 +17,12 @@ import android.view.MenuInflater
 import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.View
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
-import androidx.core.content.getSystemService
 import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.lifecycle.Observer
@@ -39,10 +33,16 @@ import androidx.navigation.ui.AppBarConfiguration
 import androidx.navigation.ui.NavigationUI
 import androidx.navigation.ui.setupActionBarWithNavController
 import androidx.navigation.ui.setupWithNavController
+import com.android.billingclient.api.BillingClient
+import com.android.billingclient.api.BillingClientStateListener
+import com.android.billingclient.api.BillingResult
+import com.android.billingclient.api.PurchasesUpdatedListener
+import com.android.billingclient.api.QueryProductDetailsParams
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.MobileAds
+import com.google.android.gms.ads.RequestConfiguration
 import com.google.android.material.navigation.NavigationView
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 
 class MainActivity : AppCompatActivity() {
@@ -57,6 +57,15 @@ class MainActivity : AppCompatActivity() {
     private var copyAction: TextView? = null
     private var exportAction: TextView? = null
     private var correctAction: TextView? = null
+    //private var isMobileAdsInitializeCalled = AtomicBoolean(false)
+    /*private val purchasesUpdatedListener = PurchasesUpdatedListener { billingResult, purchases ->
+        // À implémenter dans une section ultérieure.
+    }
+
+    private var billingClient = BillingClient.newBuilder(applicationContext)
+        .setListener(purchasesUpdatedListener)
+        .enablePendingPurchases()
+        .build()*/
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -167,16 +176,45 @@ class MainActivity : AppCompatActivity() {
             // Configure le NavController avec la barre d'outils et AppBarConfiguration
             setupActionBarWithNavController(navController, appBarConfiguration)
 
+
+                    /*billingClient.startConnection(object : BillingClientStateListener {
+                override fun onBillingSetupFinished(billingResult: BillingResult) {
+                    if (billingResult.responseCode ==  BillingClient.BillingResponseCode.OK) {
+                        // Le BillingClient est prêt. Vous pouvez interroger les achats ici.
+                    }
+                }
+                override fun onBillingServiceDisconnected() {
+                    // Logique de reconnexion
+                }
+            })
+
+            val queryProductDetailsParams = QueryProductDetailsParams.newBuilder()
+                .setProductList(listOf("votre_id_de_produit"))
+                .build()
+
+            billingClient.queryProductDetailsAsync(queryProductDetailsParams) { billingResult, productDetailsList ->
+                // Traitez les produits disponibles ici
+            }*/
+
+            MobileAds.setRequestConfiguration(
+                RequestConfiguration.Builder().setTestDeviceIds(listOf(AdRequest.DEVICE_ID_EMULATOR,"307EA1C1A01B77AA438B824C05117839")).build()
+            )
+
+
+            MobileAds.initialize(this) {
+                    initializationStatus -> Log.d("AdMob", "Initialization complete: ${initializationStatus.adapterStatusMap}")
+            }
+
             val isFullySuccessful = preferences.getBoolean("isFullySuccessful", false)
             val isFullyStopped = preferences.getBoolean("isFullyStopped", false)
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (isFullySuccessful == true) {
-                preferences.edit()?.putBoolean("isFullySuccessful", false)?.apply()
-                preferences.edit()?.putBoolean("isInitialized", true)?.apply()
+                //preferences.edit()?.putBoolean("isFullySuccessful", false)?.apply()
+                //preferences.edit()?.putBoolean("isInitialized", true)?.apply()
                 notificationManager.cancel(43)
             } else if (isFullyStopped == true) {
-                preferences.edit()?.putBoolean("isFullyStopped", false)?.apply()
-                preferences.edit()?.putBoolean("isInitialized", true)?.apply()
+                //preferences.edit()?.putBoolean("isFullyStopped", false)?.apply()
+                //preferences.edit()?.putBoolean("isInitialized", true)?.apply()
                 notificationManager.cancel(43)
             }
 
@@ -205,6 +243,9 @@ class MainActivity : AppCompatActivity() {
                             }
                             HomeViewModelHolder.viewModel.pendingSegments.clear()
                             HomeViewModelHolder.viewModel.isNowReadyToCorrect.postValue(true)
+                        } else {
+                            HomeViewModelHolder.viewModel.misspelledWords.clear()
+                            HomeViewModelHolder.viewModel.isRequestSpellingSuggestions.postValue(false)
                         }
                     }
                 })
@@ -259,7 +300,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {

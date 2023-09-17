@@ -112,7 +112,13 @@ class SpellChecker private constructor() {
         maxEditDistance: Int = SpellChecker.maxEditDistance
     ): CompletableFuture<List<TokenWithContext>> {
         return symSpell.thenApplyAsync { completedSymSpell ->
-            val suggestions = completedSymSpell.lookupCompound(misspelledPhrase, maxEditDistance, false, Verbosity.BEST_WITHIN_MAX_EDIT_DISTANCE, 3)
+            val suggestions = completedSymSpell.lookupCompound(
+                misspelledPhrase,
+                maxEditDistance,
+                false,
+                Verbosity.CLOSEST,
+                3
+            )
             Log.d("SpellChecker", "suggestions size: ${suggestions.size}")
             Log.d("SpellChecker", "misspelledPhrase: $misspelledPhrase")
             val allSuggestions = suggestions.flatMap { tokenWithContext ->
@@ -125,22 +131,27 @@ class SpellChecker private constructor() {
         }
     }
 
-        fun suggestWord(
-            misspelledWord: String,
-            verbosity: Verbosity = Verbosity.CLOSEST,
-            includeUnknown: Boolean = false
-        ): CompletableFuture<List<String>> {
-            return symSpell.thenApplyAsync { completedSymSpell ->
-                try {
-                    val suggestions =
-                        completedSymSpell.lookup(misspelledWord, verbosity, includeUnknown)
-                    Log.d("SpellChecker", "suggestions: ${suggestions.size}")
-                    Log.d("SpellChecker", "misspelledWord: $misspelledWord")
-                    suggestions.map { it.suggestion }
-                } catch (e: NotInitializedException) {
-                    Log.e("SpellChecker", "SymSpell not initialized")
-                    emptyList<String>()
-                }
+    fun suggestWord(
+        misspelledWord: String,
+        verbosity: Verbosity = Verbosity.CLOSEST,
+        includeUnknown: Boolean = false
+    ): CompletableFuture<List<String>> {
+        return symSpell.thenApplyAsync { completedSymSpell ->
+            try {
+                val suggestions =
+                    completedSymSpell.lookup(misspelledWord, verbosity, includeUnknown)
+                Log.d("SpellChecker", "suggestions: ${suggestions.size}")
+                Log.d("SpellChecker", "misspelledWord: $misspelledWord")
+                suggestions.map { it.suggestion }
+            } catch (e: NotInitializedException) {
+                Log.e("SpellChecker", "SymSpell not initialized")
+                emptyList<String>()
             }
         }
+    }
+
+    fun unload() {
+        frequencyMap.clear()
+        bigramMap.clear()
+    }
 }

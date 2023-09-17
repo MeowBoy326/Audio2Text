@@ -2,15 +2,10 @@ package com.example.audio2text
 
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.BroadcastReceiver
 import android.content.ContentValues
 import android.content.ContentValues.TAG
 import android.content.Context
 import android.content.Intent
-import android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-import android.content.IntentFilter
-import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-import android.os.Build
 import android.os.CancellationSignal
 import android.os.Handler
 import android.os.Looper
@@ -18,34 +13,36 @@ import android.os.PowerManager
 import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
-import androidx.lifecycle.lifecycleScope
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegSession
 import com.arthenica.ffmpegkit.ReturnCode
-import com.example.audio2text.MyApplication.Companion.CHANNEL_ID
 import io.gitlab.rxp90.jsymspell.TokenWithContext
 import io.gitlab.rxp90.jsymspell.api.SuggestItem
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.future.asDeferred
 import kotlinx.coroutines.future.await
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
+import java.lang.Math.ceil
+import java.lang.Math.floor
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Locale
-import kotlin.random.Random
+import java.util.concurrent.BlockingQueue
+import java.util.concurrent.LinkedBlockingQueue
+import kotlin.math.floor
 
 
 class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
@@ -68,54 +65,55 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
     private var segments_size: Int = -1
     private var global_progress: Int = 0
     private val ACTION_UPDATE_PROGRESS = "com.example.action.UPDATE_PROGRESS"
-    private val cancellationSignal = CancellationSignal()
     val fullTranscription = StringBuilder()
     val workId = id
     private var remainingText = ""
     private var paragraphe: String = ""
     private var start: Int = 0
+    val lock = Any()
     private var end: Int = 0
 
     val notification = createNotification(
         applicationContext,
-        id, // L'UUID de ce Worker
         "Transcription en cours", // Le titre de la notification
         showProgress = true,
         progress = 0
     )
 
     override suspend fun getForegroundInfo(): ForegroundInfo {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ForegroundInfo(NOTIFICATION_ID, notification, FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            ForegroundInfo(NOTIFICATION_ID, notification)
-        }
+        return ForegroundInfo(NOTIFICATION_ID, notification)
     }
 
     companion object {
         private var isReceiverRegistered = false
         private lateinit var job: Job
         private lateinit var scope: CoroutineScope
-
+        private lateinit var scopeTranscription: CoroutineScope
+        private val cancellationSignal = CancellationSignal()
+        private var ffmpegSession: FFmpegSession? = null
         var whisperContext: WhisperContext? = null
         private lateinit var notificationManager: NotificationManager
 
         const val NOTIFICATION_ID = 42
-        private var reachInference = false
-        suspend fun releaseResources(during: Boolean = false) {
-            Log.d("Whisper", "Inside releaseRessources fonction")
+        var reachInference = false
+        suspend fun releaseResources(during: Boolean = true) {
+            Log.d("Whisper", "Inside releaseRessources fonction with during : $during")
             //notificationManager.cancel(NOTIFICATION_ID)
             // Libérer les ressources ici
             if (during) {
                 whisperContext?.stopProcess()
-            } else {
                 whisperContext?.release()
                 if (::job.isInitialized) {
                     job.cancel()
                 }
+            } else {
+                cancellationSignal.cancel()
             }
+
+            SpellCheckerSingleton.release()
         }
     }
+
 
     private val inferenceStoppedListener = object : InferenceStoppedListener {
         override fun onInferenceStopped() {
@@ -177,7 +175,6 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
                     NOTIFICATION_ID,
                     createNotification(
                         applicationContext,
-                        workId,
                         "Transcription en cours",
                         showProgress = true,
                         progress = global_progress
@@ -339,7 +336,7 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
         outputFilePath: String,
         cancellationSignal: CancellationSignal,
         context: Context
-    ): Boolean = withContext(Dispatchers.IO) {
+    ): Boolean {
         val outputFile = File(outputFilePath)
 
         // Delete the output file if it exists
@@ -347,7 +344,7 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
             outputFile.delete()
         }
 
-        val command = arrayOf(
+        val commandList = mutableListOf(
             "-y",
             "-i", "\"$inputFilePath\"",
             "-af", "loudnorm=I=-16:LRA=11:TP=-1.5",
@@ -356,7 +353,37 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
             "-ac", "1",
             "-c:a", "pcm_s16le",
             "\"$outputFilePath\""
-        ).filter { it.isNotEmpty() }.joinToString(" ")
+        )
+
+        if (startTimeInSeconds >= 0 && endTimeInSeconds <= totalDurationInSeconds && startTimeInSeconds < endTimeInSeconds) {
+            val startTime = String.format(
+                "%02d:%02d:%02d",
+                startTimeInSeconds / 3600,
+                (startTimeInSeconds % 3600) / 60,
+                (startTimeInSeconds % 60)
+            )
+            val endTime = String.format(
+                "%02d:%02d:%02d",
+                endTimeInSeconds / 3600,
+                (endTimeInSeconds % 3600) / 60,
+                (endTimeInSeconds % 60)
+            )
+            commandList.add(1, startTime)
+            commandList.add(1, "-ss")
+            commandList.add(3, endTime)
+            commandList.add(3, "-to")
+        } else if (startTimeInSeconds >= 0 && startTimeInSeconds < totalDurationInSeconds && endTimeInSeconds > totalDurationInSeconds) {
+            val startTime = String.format(
+                "%02d:%02d:%02d",
+                startTimeInSeconds / 3600,
+                (startTimeInSeconds % 3600) / 60,
+                (startTimeInSeconds % 60)
+            )
+            commandList.add(1, startTime)
+            commandList.add(1, "-ss")
+        }
+
+        val command = commandList.filter { it.isNotEmpty() }.joinToString(" ")
 
         Log.d(ContentValues.TAG, "Starting audio conversion with command: $command")
 
@@ -368,14 +395,16 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
         val deferred = CompletableDeferred<Boolean>()
 
         FFmpegKit.executeAsync(command) { session: FFmpegSession ->
+            ffmpegSession = session
             deferred.complete(session.returnCode.value == ReturnCode.SUCCESS)
         }
 
         cancellationSignal.setOnCancelListener {
+            ffmpegSession?.cancel()
             deferred.cancel()
         }
 
-        return@withContext deferred.await()
+        return deferred.await()
     }
 
 
@@ -459,7 +488,15 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
         return segments
     }
 
-    suspend fun initSpellChecker(context: Context) = withContext(Dispatchers.Default) {
+    suspend fun getOrInitializeSpellChecker(context: Context): SpellChecker? =
+        withContext(Dispatchers.Default) {
+            if (SpellCheckerSingleton.spellChecker == null) {
+                initSpellChecker(context)
+            }
+            return@withContext SpellCheckerSingleton.spellChecker
+        }
+
+    suspend fun initSpellChecker(context: Context) {
         if (SpellCheckerSingleton.spellChecker == null) {
             val preferences =
                 context.getSharedPreferences("MyPreferences", Context.MODE_PRIVATE)
@@ -467,7 +504,7 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
             if (selectedDictionaryId?.isNotEmpty() == true) {
                 withContext(Dispatchers.Main) {
                     val showText =
-                        "Initialisation du correcteur orthographique pour la première fois..."
+                        "Initialisation du correcteur orthographique..."
                     HomeViewModelHolder.viewModel.saveTemporaryTranscription(showText)
                 }
 
@@ -481,10 +518,14 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
                     .loadBigramDictionary(context, bigramPath)
                     .withMaxEditDistance(2)
                     .buildAsync()
-                    .await()  // Utilisation de await pour attendre la fin de la tâche
 
-                if (futureSpellChecker != null) {
-                    SpellCheckerSingleton.spellChecker = futureSpellChecker
+
+                if (isStopped) {
+                    futureSpellChecker.cancel(true)
+                }
+
+                if (!futureSpellChecker.isCancelled) {
+                    SpellCheckerSingleton.spellChecker = futureSpellChecker.await()
                     SpellCheckerSingleton.isSpellCheckerReady.postValue(true)
                     SpellCheckerSingleton.spellCheckerReadyListener = spellCheckerReadyListener
                 } else {
@@ -521,41 +562,6 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
         notificationManager.notify(43, notification)
     }
 
-    private fun saveTranscription(transcriptionText: String) {
-        val values = ContentValues().apply {
-            put("transcription", transcriptionText)
-        }
-        val uri = TranscriptionContentProvider.CONTENT_URI
-
-        // Utiliser ContentResolver pour insérer les données
-        applicationContext.contentResolver?.insert(uri, values)
-    }
-
-    fun adaptCasingForTokenWithContext(tokenWithContext: TokenWithContext): TokenWithContext {
-        val originalToken = tokenWithContext.originalToken
-        val adaptedSuggestions = tokenWithContext.suggestions.map { suggestItem ->
-            val adaptedSuggestion = adaptCasing(originalToken, suggestItem.suggestion)
-            SuggestItem(
-                adaptedSuggestion,
-                suggestItem.editDistance,
-                suggestItem.frequencyOfSuggestionInDict
-            )
-        }
-
-        val bestSuggestionInContext = tokenWithContext.bestSuggestionInContext
-        val adaptedBestSuggestionInContext = if (bestSuggestionInContext != null) {
-            SuggestItem(
-                adaptCasing(originalToken, bestSuggestionInContext.suggestion),
-                bestSuggestionInContext.editDistance,
-                bestSuggestionInContext.frequencyOfSuggestionInDict
-            )
-        } else {
-            null
-        }
-
-        return TokenWithContext(originalToken, adaptedSuggestions, adaptedBestSuggestionInContext)
-    }
-
     fun adaptCasing(original: String, suggestion: String): String {
         return if (original.all { it.isUpperCase() }) {
             suggestion.uppercase(Locale.ROOT)
@@ -568,66 +574,77 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
 
     suspend fun gatherContextualSpellingSuggestions(text: String) =
         CoroutineScope(Dispatchers.Default).launch {
-            // Ignorer le texte avant l'offset
             val textWithoutFirstLine = text.substringAfter("\n\n")
-            Log.d("Whisper", "textWithoutFirstLine: $textWithoutFirstLine")
 
-            // Diviser le texte en parties de phrase en utilisant les signes de ponctuation comme délimiteurs
-            val sentenceParts = textWithoutFirstLine.split(Regex("[,.!;?:\"\\\\]"))
+            val sentenceParts =
+                textWithoutFirstLine.split(Regex("[,.!;?:\"\\\\]")).filter { it.isNotBlank() }
 
             for (sentencePart in sentenceParts) {
-                val lowercasedSentencePart = sentencePart.lowercase()
                 val tokenWithContextList =
-                    SpellCheckerSingleton.spellChecker?.suggest(lowercasedSentencePart)?.await()
+                    SpellCheckerSingleton.spellChecker?.suggest(sentencePart.trim())?.await()
 
-                if (tokenWithContextList != null && tokenWithContextList.isNotEmpty()) {
-
-                    // Ici, nous adaptons les suggestions à la casse originale
-                    val adaptedTokenWithContextList =
-                        tokenWithContextList.map { tokenWithContext ->
-                            adaptCasingForTokenWithContext(tokenWithContext)
-                        }
+                if (!tokenWithContextList.isNullOrEmpty()) {
 
                     val originalWords =
                         sentencePart.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
                     var runningIndex = 0
-
-                    for (i in originalWords.indices) {
+                    var i = 0  // Index pour parcourir originalWords
+                    Log.d("TranscriptionWorker", "original words: ${originalWords.size}")
+                    for (tokenWithContext in tokenWithContextList) {
                         val original = originalWords[i]
-                        val tokenWithContext = adaptedTokenWithContextList[i]
-                        Log.d("Whisper", "original: $original")
-                        val suggested =
-                            tokenWithContext.suggestions.map { it.suggestion } // C'est maintenant une liste
-                        for (suggest in suggested) {
-                            Log.d("Whisper", "suggest: $suggest")
-                        }
+                        val suggested = tokenWithContext.suggestions.map { it.suggestion }
 
-                        if (suggested.isNotEmpty() && !suggested.contains(original.trim())) {
-                            // Trouvez l'indice de la nouvelle occurrence
-                            val start =
-                                HomeViewModelHolder.viewModel.transcription.value?.indexOf(
-                                    original,
-                                    runningIndex
-                                )
-                            Log.d("Whisper", "start: $start")
-                            Log.d("Whisper", "original: $original")
+                        if (tokenWithContext.isCombination) {
+                            // Le token est une combinaison de mots, donc nous incrémentons i une fois de plus pour le mot suivant
+                            i++
+                            val nextOriginal = originalWords[i]
+                            val combinedOriginal = "$original $nextOriginal"
 
-                            // Mettez à jour l'indice de début pour les recherches futures
-                            runningIndex = start?.plus(original.length)?.inc()!!
-                            Log.d("Whisper", "runningIndex: $runningIndex")
-
-                            HomeViewModelHolder.viewModel.misspelledWords.add(
-                                MisspelledWordInfo(
-                                    start,
-                                    start.plus(original.length),
-                                    suggested  // C'est maintenant une liste
-                                )
+                            Log.d(
+                                "Transcription Worker",
+                                "Combination is $combinedOriginal at $start"
                             )
+
+                            // Trouvez les indices de début et de fin pour la combinaison
+                            val start = HomeViewModelHolder.viewModel.transcription.value?.indexOf(
+                                combinedOriginal,
+                                runningIndex
+                            )
+                            val end = start?.plus(combinedOriginal.length)
+
+                            // Mettez à jour les indices pour les recherches futures
+                            runningIndex = end?.inc()!!
+
+                            // Ajoutez les informations sur le mot mal orthographié
+                            if (suggested.isNotEmpty() && !suggested.contains(combinedOriginal.trim())) {
+                                HomeViewModelHolder.viewModel.misspelledWords.add(
+                                    MisspelledWordInfo(start, end, suggested)
+                                )
+                            }
                         } else {
-                            // Si le mot est correct ou si les suggestions contiennent le mot original,
-                            // mettre à jour runningIndex pour ignorer ce mot lors de la prochaine recherche
-                            runningIndex += original.length + 1 // +1 pour un éventuel espace ou signe de ponctuation
+                            val start = HomeViewModelHolder.viewModel.transcription.value?.indexOf(
+                                original,
+                                runningIndex
+                            )
+                            val end = start?.plus(original.length)
+
+                            Log.d(
+                                "TranscriptionWorker",
+                                "start $start and end $end are null for original word: $original at $runningIndex"
+                            )
+
+                            // Mettez à jour les indices pour les recherches futures
+                            runningIndex = end?.inc()!!
+
+                            // Ajoutez les informations sur le mot mal orthographié
+                            if (suggested.isNotEmpty() && !suggested.contains(original.trim())) {
+                                HomeViewModelHolder.viewModel.misspelledWords.add(
+                                    MisspelledWordInfo(start, end, suggested)
+                                )
+                            }
                         }
+
+                        i++  // Incrémentation de l'indice pour le mot suivant
                     }
                 }
             }
@@ -686,8 +703,6 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
         notificationManager =
             applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-        notificationManager.cancel(43)
-
         val audioFilePath = inputData.getString("audioFilePath") ?: return Result.failure()
         val fileNameWithoutExtension =
             File(audioFilePath).name.replaceFirst("[.][^.]+$".toRegex(), "")
@@ -695,23 +710,25 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
         val outputFile = File(applicationContext.filesDir, outputFileName)
         val outputFilePath = outputFile.absolutePath
 
+        notificationManager.cancel(43)
+
         //setForeground(createForegroundInfo("Transcription en cours"))
 
         return try {
-            if (!isStopped) {
-                setForegroundAsync(getForegroundInfo())
-            } else {
-                preferences.edit().putBoolean("stoppedBeforeInference", true).apply()
-                Result.failure()
-            }
+            setForegroundAsync(getForegroundInfo())
             val selectedItem = preferences!!.getString("selectedDictionaryId", null)
             if (SpellCheckerSingleton.spellChecker == null && selectedItem != null) {
-                initSpellChecker(applicationContext)
+                getOrInitializeSpellChecker(applicationContext)
             }
             // Conversion de l'audio en WAV
-            if (convertAudioToWav(audioFilePath, outputFilePath, cancellationSignal, applicationContext)) {
+            if (convertAudioToWav(
+                    audioFilePath,
+                    outputFilePath,
+                    cancellationSignal,
+                    applicationContext
+                )
+            ) {
                 loadModel()
-
                 whisperContext?.setProgressCallback(progressListener)
                 whisperContext?.setSegmentCallback(segmentListener)
                 whisperContext?.setInferenceStoppedCallback(inferenceStoppedListener)
@@ -727,104 +744,128 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
                 val segments = splitAudioIntoSegments(outputFile, segmentLength)
                 segments_size = segments.size
                 fullTranscription.append("Résultat de la transcription :\n\n")
-                reachInference = true
+                HomeViewModelHolder.viewModel.reachInference.postValue(true)
                 //var contextPrompt = initialPrompt
 
-                var offset_ms = 0
-                var duration_ms = 0
+                if (!isStopped) {
 
-                if (startTimeInSeconds >= 0 && endTimeInSeconds <= totalDurationInSeconds && startTimeInSeconds < endTimeInSeconds) {
-                    offset_ms = startTimeInSeconds * 1000  // Convertir en millisecondes
-                    duration_ms =
-                        (endTimeInSeconds - startTimeInSeconds) * 1000  // Convertir en millisecondes
-                } else if (startTimeInSeconds >= 0 && startTimeInSeconds < totalDurationInSeconds && endTimeInSeconds > totalDurationInSeconds) {
-                    offset_ms = startTimeInSeconds * 1000  // Convertir en millisecondes
-                    duration_ms =
-                        (totalDurationInSeconds.toInt() - startTimeInSeconds) * 1000  // Convertir en millisecondes
-                } else if (startTimeInSeconds == endTimeInSeconds) {
-                    // Si les deux sont égaux, on mettra offset et duration à 0
-                    offset_ms = 0
-                    duration_ms = 0
-                }
+                    var previousGeneration: String = initialPrompt
+                    var previousAudio: FloatArray = floatArrayOf()
+                    var endOffset = 480000
+                    var seekDelta: Float
+                    var remainingSegment: FloatArray = floatArrayOf()
+                    var combinedSegment: FloatArray = floatArrayOf()
 
-                Log.d("Whisper", "offset_ms: $offset_ms")
-                Log.d("Whisper", "duration_ms: $duration_ms")
+                    for (segment in segments) {
 
-                var previousGeneration: String = initialPrompt
-                var previousAudio: FloatArray = floatArrayOf()
-                var startOffset = 0  // Position initiale de départ pour le prochain segment
-                var seekDelta: Int
-                var resultLen: Int
+                        Log.d(
+                            "Whisper",
+                            "Début du traitement du segment, endOffest: $endOffset"
+                        )
 
-                for (segment in segments) {
-                    Log.d("Whisper", "Début du traitement du segment, startOffset: $startOffset")
+                        val adjustedSegment = if (currentSegmentIndex < segments_size - 1) {
+                            segment.sliceArray(0 until endOffset)
+                        } else {
+                            combinedSegment.sliceArray(0 until endOffset)
+                        }
 
-                    // Ajustez la plage du segment en utilisant startOffset et seekDelta
-                    val adjustedSegment = segment.sliceArray(startOffset until segment.size)
+                        // Concaténer avec l'audio précédent conservé
+                        combinedSegment = if (currentSegmentIndex < segments_size - 1) {
+                            previousAudio + remainingSegment + adjustedSegment
+                        } else {
+                            adjustedSegment
+                        }
+                        Log.d("Whisper", "Taille du segment ajusté: ${adjustedSegment.size}")
+                        Log.d("Whisper", "Taille du segment combiné: ${combinedSegment.size}")
+                        Log.d("Whisper", "Taille du segment restant: ${remainingSegment.size}")
 
-                    // Concaténer avec l'audio précédent conservé
-                    val combinedSegment = previousAudio + adjustedSegment
-                    Log.d("Whisper", "Taille du segment combiné: ${combinedSegment.size}")
+                        val textSegment = whisperContext?.transcribeData(
+                            combinedSegment,
+                            selectedLanguage,
+                            selectedLanguageToIgnore,
+                            translate,
+                            speed,
+                            initialPrompt,
+                            maxSize
+                        )
+
+                        Log.d("Whisper", "text at $currentSegmentIndex is $textSegment")
+
+                        Log.d("whisper", "original seek delta : ${whisperContext?.getSeekDelta()}")
+
+                        seekDelta =
+                            (whisperContext?.getSeekDelta()?.toFloat()?.times(10000)?.div(16000))
+                                ?: 0f  // Mettez à jour à partir de l'API
+
+                        Log.d("Whisper", "seekDelta: $seekDelta")
+
+                        remainingSegment = if (currentSegmentIndex > 0 && currentSegmentIndex < segments_size - 1) {
+                            segment.sliceArray(endOffset until segment.size)
+                        } else if (currentSegmentIndex == segments_size -1) {
+                            adjustedSegment
+                        } else {
+                            floatArrayOf()
+                        }
+
+                        // Calculer jusqu'où couper le prochain segment pour que le total fasse 480000
+                        val keepUntilIndex = combinedSegment.size - kotlin.math.ceil(seekDelta).toInt()
+                        previousAudio = if (seekDelta > 0 && seekDelta < segment.size) {
+                            combinedSegment.sliceArray(keepUntilIndex.toInt() until segment.size)
+                        } else {
+                            floatArrayOf()
+                        }
+
+                        Log.d(
+                            "Whisper",
+                            "Taille de l'audio précédent conservé: ${previousAudio.size}"
+                        )
+
+                        endOffset = segment.size - previousAudio.size - remainingSegment.size
+
+                        //previousGeneration = textSegment!!
+
+                        currentSegmentIndex++
+                    }
 
                     val textSegment = whisperContext?.transcribeData(
-                        combinedSegment,
+                        previousAudio + remainingSegment,
                         selectedLanguage,
                         selectedLanguageToIgnore,
                         translate,
                         speed,
-                        previousGeneration,
-                        maxSize,
-                        offset_ms,
-                        duration_ms
+                        initialPrompt,
+                        maxSize
                     )
 
-                    seekDelta =
-                        whisperContext?.getSeekDelta() ?: 0  // Mettez à jour à partir de l'API
-                    resultLen =
-                        whisperContext?.getResultLen() ?: 0  // Mettez à jour à partir de l'API
+                    HomeViewModelHolder.viewModel.reachInference.postValue(false)
 
-                    Log.d("Whisper", "seekDelta: $seekDelta")
-                    Log.d("Whisper", "resultLen: $resultLen")
+                    fullTranscription.setLength(fullTranscription.length - 2)
+                    Log.d("Whisper", "Substring: start is $end")
+                    paragraphe = fullTranscription.substring(end)
 
-                    // Conserver une partie du segment pour le prochain tour
-                    val keepIndex = segment.size - seekDelta
-                    if (keepIndex > 0 && keepIndex < segment.size) {
-                        previousAudio = segment.sliceArray(keepIndex until segment.size)
+                    if (SpellCheckerSingleton.isSpellCheckerReady.value == true) {
+                        // Traitement habituel
+                        Log.d("Whisper", "Déjà prêt lors de l'inférence")
+                        gatherContextualSpellingSuggestions(paragraphe)
+                        HomeViewModelHolder.viewModel.isNowReadyToCorrect.postValue(true)
                     } else {
-                        previousAudio = floatArrayOf()
+                        Log.d("Whisper", "On doit attendre que SpellChecker soit prêt")
+                        // Ajoutez à la file d'attente en attendant que le SpellChecker soit prêt
+                        HomeViewModelHolder.viewModel.pendingSegments.add(paragraphe)
                     }
 
-                    Log.d("Whisper", "Taille de l'audio précédent conservé: ${previousAudio.size}")
+                    HomeViewModelHolder.viewModel.saveTemporaryTranscription(fullTranscription.toString())
+                    HomeViewModelHolder.viewModel.saveTranscription(
+                        applicationContext,
+                        fullTranscription.toString()
+                    )
 
-                    startOffset += seekDelta  // Mettez à jour startOffset pour le prochain segment
-                    previousGeneration = textSegment?.takeLast(resultLen) ?: ""
+                    showCompletionNotification()
 
-                    Log.d("Whisper", "previousGeneration: $previousGeneration")
-
-                    currentSegmentIndex++
-                }
-                reachInference = false
-
-                HomeViewModelHolder.viewModel.saveTemporaryTranscription(fullTranscription.toString())
-                //saveTranscription(fullTranscription.toString())
-
-                Log.d("Whisper", "Substring: start is $end")
-                paragraphe = fullTranscription.substring(end)
-
-                if (SpellCheckerSingleton.isSpellCheckerReady.value == true) {
-                    // Traitement habituel
-                    Log.d("Whisper", "Déjà prêt lors de l'inférence")
-                    gatherContextualSpellingSuggestions(paragraphe)
-                    HomeViewModelHolder.viewModel.isNowReadyToCorrect.postValue(true)
+                    Result.success()
                 } else {
-                    Log.d("Whisper", "On doit attendre que SpellChecker soit prêt")
-                    // Ajoutez à la file d'attente en attendant que le SpellChecker soit prêt
-                    HomeViewModelHolder.viewModel.pendingSegments.add(paragraphe)
+                    Result.failure()
                 }
-
-                showCompletionNotification()
-
-                Result.success()
             } else {
                 Result.failure()
             }
@@ -834,6 +875,7 @@ class TranscriptionWorker(context: Context, parameters: WorkerParameters) :
         } finally {
             Log.d("Whisper", "Call to finally")
             outputFile.delete()
+            //notificationManager.cancel(NOTIFICATION_ID)
             //releaseResources()
         }
     }

@@ -6,10 +6,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <!--<uses-permission android:name="com.google.android.gms.permission.AD_ID"/>-->
 
     <application
         android:name=".MyApplication"
@@ -24,16 +24,18 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.MyApp"
         tools:targetApi="tiramisu">
+        <uses-library android:name="org.apache.http.legacy" android:required="false" />
+        <!--ca-app-pub-9035387236956028~8673330468-->
         <activity
             android:name=".OnboardingActivity"
             android:windowSoftInputMode="adjustPan"
             android:exported="false" />
-        <!--
-        <service android:name=".TranscriptionService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync"
-            android:process=":transcriptionProcess"/>
-        -->
+        <receiver android:name=".StopTranscriptionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="STOP_TRANSCRIPTION" />
+            </intent-filter>
+        </receiver>
         <provider
             android:name=".TranscriptionContentProvider"
             android:authorities="com.example.audio2text"
@@ -41,13 +43,17 @@
         <service
             android:name=".DownloadService"
             android:foregroundServiceType="dataSync" />
+
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="location|microphone"
+            tools:node="merge" />
+
         <activity
             android:name=".MainActivity"
             android:windowSoftInputMode="adjustPan"
             android:clearTaskOnLaunch="true"
+            android:hardwareAccelerated="true"
             android:launchMode="singleTop"
             android:exported="true">
             <intent-filter>
@@ -76,6 +82,8 @@
                 <data android:pathPattern=".*\\..*" />
             </intent-filter>
         </activity>
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-9035387236956028~8673330468"/>
     </application>
-
 </manifest>

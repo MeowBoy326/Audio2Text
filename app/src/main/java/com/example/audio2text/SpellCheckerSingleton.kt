@@ -6,4 +6,9 @@ object SpellCheckerSingleton {
     var spellChecker: SpellChecker? = null
     var isSpellCheckerReady = MutableLiveData<Boolean>()
     var spellCheckerReadyListener: SpellCheckerReadyListener? = null
+
+    fun release() {
+        spellChecker?.unload()
+        spellChecker = null
+    }
 }

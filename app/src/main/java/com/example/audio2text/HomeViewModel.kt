@@ -1,6 +1,7 @@
 package com.example.audio2text
 
 import android.app.Application
+import android.content.ContentValues
 import android.content.Context
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
@@ -17,7 +18,6 @@ import java.util.concurrent.CopyOnWriteArrayList
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val isInitializedLiveData = MutableLiveData<Boolean>()
     val isNowReadyToCorrect = MutableLiveData<Boolean>()
-
     // Stockez l'état de vos éléments de vue ici, par exemple:
     val transcription = MutableLiveData<String>()
     val isTranscriptionTextEnabled = MutableLiveData<Boolean>()
@@ -37,6 +37,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val isEditingTranscriptionText = MutableLiveData<Boolean>()
     val misspelledWords = CopyOnWriteArrayList<MisspelledWordInfo>()
     val isSpellAlreadyRequested = MutableLiveData<Boolean>()
+    val reachInference = MutableLiveData<Boolean>()
 
     //val isRunning = MutableLiveData<Boolean>()
     //private val contentResolver = application.contentResolver
@@ -77,14 +78,24 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             isInitializedLiveData.postValue(true)
         }
 
-        loadTranscription()
+        loadTranscription(application.applicationContext)
     }
 
     fun saveTemporaryTranscription(transcriptionText: String?) {
         TranscriptionContentProvider().updateTemporaryText(transcriptionText)
     }
 
-    fun loadTranscription() {
+    fun saveTranscription(context: Context, transcriptionText: String) {
+        val values = ContentValues().apply {
+            put("transcription", transcriptionText)
+        }
+        val uri = TranscriptionContentProvider.CONTENT_URI
+
+        // Utiliser ContentResolver pour insérer les données
+        context.contentResolver?.insert(uri, values)
+    }
+
+    fun loadTranscription(context: Context) {
         viewModelScope.launch {
             merge(
                 isFullySuccessfulLiveData.asFlow(),
@@ -106,10 +117,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
                     isFullyStoppedLiveData.value == true || isInitializedLiveData.value == true -> {
                         // Observer temporaryText
+                        context.contentResolver.delete(
+                            TranscriptionContentProvider.CONTENT_URI,
+                            null,
+                            null
+                        )
                         transcription.postValue("")
                     }
 
-                    isRunningLiveData.value == true || isGoingToStopLiveData.value == true || isFullySuccessfulLiveData.value == true -> {
+                    isRunningLiveData.value == true || isGoingToStopLiveData.value == true -> {
                         // Observer temporaryText
                         TranscriptionContentProvider.temporaryText.collect { tempText ->
                             Log.d("HomeViewModel", "tempText: $tempText")
@@ -117,6 +133,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                             if (tempText != null) {
                                 transcription.postValue(tempText)
                             }
+                        }
+                    }
+
+                    isFullySuccessfulLiveData.value == true -> {
+                        TranscriptionContentProvider.cachedTranscription.collect { finalTranscript ->
+                            Log.d("HomeViewModel","finalTranscript is $finalTranscript")
+                            transcription.postValue(finalTranscript?.content)
                         }
                     }
                 }

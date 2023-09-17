@@ -23,6 +23,17 @@
             android:textAlignment="center"
             android:textSize="24sp" />
 
+        <com.google.android.gms.ads.AdView
+            xmlns:ads="http://schemas.android.com/apk/res-auto"
+            android:id="@+id/adView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerHorizontal="true"
+            android:layout_alignParentTop="true"
+            ads:adSize="BANNER"
+            ads:adUnitId="ca-app-pub-3940256099942544/6300978111">
+        </com.google.android.gms.ads.AdView>
+
         <EditText
             android:id="@+id/resultEditText"
             android:layout_width="match_parent"
@@ -31,6 +42,7 @@
             android:scrollbars="vertical"
             android:textSize="20sp"
             android:layout_marginBottom="90dp"
+            android:layout_below="@id/adView"
             android:padding="16dp"
             android:imeOptions="actionNone"
             android:background="@android:color/transparent"

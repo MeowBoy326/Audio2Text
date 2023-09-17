@@ -10,6 +10,7 @@ import android.content.SharedPreferences
 import android.util.Log
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
+//import com.google.android.gms.ads.MobileAds
 import io.reactivex.rxjava3.exceptions.UndeliverableException
 import io.reactivex.rxjava3.plugins.RxJavaPlugins
 import java.io.IOException
@@ -30,6 +31,8 @@ class MyApplication : Application() {
 
         // Create the NotificationChannel
         val name = getString(R.string.channel_name)
+        val name2 = getString(R.string.channel_name2)
+        val name3= getString(R.string.channel_name3)
         val descriptionText = getString(R.string.channel_description)
         val importance = NotificationManager.IMPORTANCE_LOW
         val channel = createNotificationChannel(applicationContext, CHANNEL_ID, name, importance)
@@ -37,10 +40,10 @@ class MyApplication : Application() {
             description = descriptionText
         }*/
         channel.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-        val channel2 = createNotificationChannel(applicationContext, CHANNEL_ID2, name, importance)
+        val channel2 = createNotificationChannel(applicationContext, CHANNEL_ID2, name2, importance)
             /*NotificationChannel(CHANNEL_ID2, "Téléchargements", NotificationManager.IMPORTANCE_LOW)*/
 
-        val channel3 = createNotificationChannel(applicationContext, CHANNEL_ID3, name, importance)
+        val channel3 = createNotificationChannel(applicationContext, CHANNEL_ID3, name3, importance)
             /*NotificationChannel(CHANNEL_ID3, "Chargement du correcteur", NotificationManager.IMPORTANCE_LOW)*/
         val notificationManager: NotificationManager =
             getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
